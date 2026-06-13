@@ -1,0 +1,16 @@
+{
+  "name": "기프티콘 매입 관리",
+  "short_name": "매입관리",
+  "description": "기프티콘 대량 매입 워크플로우 관리",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

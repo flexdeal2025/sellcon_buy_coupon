@@ -1,65 +1,150 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRecords } from "@/hooks/use-records";
+import { PurchaseCard } from "@/components/purchase-card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { formatKRW, formatYearMonth } from "@/lib/utils";
+import { OPEN_STATUSES, PURCHASE_STATUSES, type PurchaseStatus } from "@/lib/types";
+import { Wallet, ListChecks, PlusCircle, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type Filter = "전체" | "미완료" | PurchaseStatus;
+const FILTERS: Filter[] = ["전체", "미완료", ...PURCHASE_STATUSES];
+
+export default function DashboardPage() {
+  const { records, loading } = useRecords();
+  const router = useRouter();
+  const [filter, setFilter] = useState<Filter>("미완료");
+
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  const summary = useMemo(() => {
+    const thisMonth = records.filter((r) => r.purchase_date?.startsWith(ym));
+    const monthTotal = thisMonth.reduce((s, r) => s + Number(r.total_price || 0), 0);
+    const openCount = records.filter((r) =>
+      OPEN_STATUSES.includes(r.status),
+    ).length;
+    const issueCount = records.filter((r) => r.status === "이슈발생").length;
+    return { monthTotal, openCount, issueCount, monthCount: thisMonth.length };
+  }, [records, ym]);
+
+  const filtered = useMemo(() => {
+    return records.filter((r) => {
+      if (filter === "전체") return true;
+      if (filter === "미완료") return OPEN_STATUSES.includes(r.status);
+      return r.status === filter;
+    });
+  }, [records, filter]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="space-y-5">
+      {/* 요약 대시보드 */}
+      <div>
+        <h1 className="text-xl font-bold">현황 홈</h1>
+        <p className="text-sm text-muted-foreground">{formatYearMonth(now)} 기준</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Card className="bg-primary text-primary-foreground">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm opacity-90">
+              <Wallet className="h-4 w-4" />
+              이번 달 총 매입액
+            </div>
+            <p className="mt-2 text-2xl font-bold tabular-nums">
+              {formatKRW(summary.monthTotal)}
+            </p>
+            <p className="mt-1 text-xs opacity-80">{summary.monthCount}건</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <ListChecks className="h-4 w-4" />
+              미완료 건수
+            </div>
+            <p className="mt-2 text-2xl font-bold tabular-nums">{summary.openCount}건</p>
+            <p className="mt-1 text-xs">
+              {summary.issueCount > 0 ? (
+                <span className="font-semibold text-destructive">
+                  🚨 이슈 {summary.issueCount}건
+                </span>
+              ) : (
+                <span className="text-muted-foreground">이슈 없음</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Button asChild size="lg" className="w-full">
+        <Link href="/new">
+          <PlusCircle className="h-5 w-5" />
+          신규 매입 등록
+        </Link>
+      </Button>
+
+      {/* 필터 칩 */}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {FILTERS.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={cn(
+              "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
+              filter === f
+                ? "bg-foreground text-background"
+                : "bg-secondary text-secondary-foreground",
+            )}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {/* 리스트 */}
+      {loading ? (
+        <div className="flex justify-center py-12 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            표시할 매입 건이 없습니다.
+            <div className="mt-3">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/new">첫 매입 등록하기</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">{filtered.length}건</span>
+            <Badge variant="outline" className="gap-1 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+              </span>
+              실시간 동기화
+            </Badge>
+          </div>
+          {filtered.map((r) => (
+            <PurchaseCard
+              key={r.id}
+              record={r}
+              onClick={() => router.push(`/inventory?id=${r.id}`)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          ))}
         </div>
-      </main>
+      )}
     </div>
   );
 }

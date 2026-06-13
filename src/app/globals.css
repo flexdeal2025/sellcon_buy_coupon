@@ -1,26 +1,141 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.75rem;
+
+  --background: oklch(0.99 0.003 247);
+  --foreground: oklch(0.22 0.02 256);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.02 256);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.02 256);
+
+  --primary: oklch(0.52 0.18 264);
+  --primary-foreground: oklch(0.99 0.003 247);
+
+  --secondary: oklch(0.96 0.01 256);
+  --secondary-foreground: oklch(0.3 0.03 256);
+
+  --muted: oklch(0.96 0.01 256);
+  --muted-foreground: oklch(0.55 0.02 256);
+
+  --accent: oklch(0.95 0.03 264);
+  --accent-foreground: oklch(0.32 0.08 264);
+
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.99 0.003 247);
+
+  --success: oklch(0.6 0.15 152);
+  --success-foreground: oklch(0.99 0.003 247);
+
+  --warning: oklch(0.72 0.16 65);
+  --warning-foreground: oklch(0.25 0.05 65);
+
+  --border: oklch(0.92 0.01 256);
+  --input: oklch(0.92 0.01 256);
+  --ring: oklch(0.52 0.18 264);
+}
+
+.dark {
+  --background: oklch(0.18 0.02 256);
+  --foreground: oklch(0.95 0.01 256);
+
+  --card: oklch(0.22 0.02 256);
+  --card-foreground: oklch(0.95 0.01 256);
+
+  --popover: oklch(0.22 0.02 256);
+  --popover-foreground: oklch(0.95 0.01 256);
+
+  --primary: oklch(0.65 0.17 264);
+  --primary-foreground: oklch(0.18 0.02 256);
+
+  --secondary: oklch(0.28 0.02 256);
+  --secondary-foreground: oklch(0.9 0.01 256);
+
+  --muted: oklch(0.28 0.02 256);
+  --muted-foreground: oklch(0.65 0.02 256);
+
+  --accent: oklch(0.32 0.05 264);
+  --accent-foreground: oklch(0.9 0.03 264);
+
+  --destructive: oklch(0.65 0.2 27);
+  --destructive-foreground: oklch(0.99 0.003 247);
+
+  --success: oklch(0.65 0.15 152);
+  --success-foreground: oklch(0.18 0.02 256);
+
+  --warning: oklch(0.75 0.15 65);
+  --warning-foreground: oklch(0.2 0.04 65);
+
+  --border: oklch(0.3 0.02 256);
+  --input: oklch(0.32 0.02 256);
+  --ring: oklch(0.65 0.17 264);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-pretendard), system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* 모바일 한 손 입력 최적화: iOS 자동 줌 방지를 위해 입력 폰트 16px 이상 */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 모바일 safe-area 대응 (하단 네비게이션 바) */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 숫자 입력 스피너 제거 (모바일에서 깔끔하게) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
 }
