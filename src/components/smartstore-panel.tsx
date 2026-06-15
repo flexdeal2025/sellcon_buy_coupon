@@ -65,13 +65,21 @@ export function SmartstorePanel() {
     // 7일 / 30일 집계
     const thirtyAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
     const sevenAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
-    const { data: sales } = await supabase
-      .from("smartstore_daily_sales")
-      .select("channel_product_no, sale_date, total_quantity, total_revenue")
-      .gte("sale_date", thirtyAgo);
+    // Supabase 기본 1000행 제한 회피 — range 페이지네이션으로 전체 수집
+    const sales: { channel_product_no: number; sale_date: string; total_quantity: number; total_revenue: number }[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase
+        .from("smartstore_daily_sales")
+        .select("channel_product_no, sale_date, total_quantity, total_revenue")
+        .gte("sale_date", thirtyAgo)
+        .order("sale_date", { ascending: true })
+        .range(from, from + 999);
+      sales.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
 
     const m = new Map<number, SalesStat>();
-    for (const s of sales ?? []) {
+    for (const s of sales) {
       const cur = m.get(s.channel_product_no) ?? { channel_product_no: s.channel_product_no, qty7d: 0, qty30d: 0, rev30d: 0 };
       cur.qty30d += s.total_quantity;
       cur.rev30d += s.total_revenue;
