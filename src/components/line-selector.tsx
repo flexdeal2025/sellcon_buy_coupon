@@ -122,6 +122,12 @@ export function LineSelector({
           const phoneLabel = line.phone_number
             ? line.phone_number.replace(/\D/g, "").slice(3) // 010 제거 → 8자리
             : (line.alias?.trim() ?? null);
+          // 8자리를 앞4 / 뒤4 로 분리
+          const digits = phoneLabel?.length === 8 ? phoneLabel : null;
+          const top4 = digits ? digits.slice(0, 4) : null;
+          const bot4 = digits ? digits.slice(4) : null;
+          const shortLabel = digits ? null : phoneLabel; // 8자리 아닌 경우(alias 등)
+
           return (
             <button
               key={seq}
@@ -129,7 +135,7 @@ export function LineSelector({
               disabled={disabled}
               onClick={() => toggle(seq)}
               className={cn(
-                "relative flex h-[52px] flex-col items-center justify-center gap-0.5 rounded-lg border text-sm font-bold tabular-nums transition-all active:scale-95",
+                "relative flex h-[62px] flex-col items-center justify-center gap-px rounded-lg border tabular-nums transition-all active:scale-95",
                 disabled &&
                   "cursor-not-allowed border-dashed border-border bg-muted text-muted-foreground/40 line-through",
                 !disabled &&
@@ -145,16 +151,15 @@ export function LineSelector({
                   "border-border bg-background text-foreground hover:border-primary/40",
               )}
             >
-              <span className="leading-none">{seq}</span>
-              {phoneLabel && (
-                <span
-                  className={cn(
-                    "text-[8px] leading-none tracking-tighter tabular-nums",
-                    isSelected ? "opacity-80" : "opacity-50",
-                  )}
-                >
-                  {phoneLabel}
-                </span>
+              <span className="text-sm font-bold leading-none">{seq}</span>
+              {top4 && (
+                <>
+                  <span className={cn("text-[10px] font-medium leading-none", isSelected ? "opacity-85" : "opacity-55")}>{top4}</span>
+                  <span className={cn("text-[10px] font-medium leading-none", isSelected ? "opacity-85" : "opacity-55")}>{bot4}</span>
+                </>
+              )}
+              {shortLabel && (
+                <span className={cn("text-[9px] leading-none", isSelected ? "opacity-85" : "opacity-55")}>{shortLabel}</span>
               )}
               {isReco && !isSelected && !disabled && (
                 <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary" />

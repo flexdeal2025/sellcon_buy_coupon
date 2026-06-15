@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { usePhoneLines } from "@/hooks/use-phone-lines";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,16 @@ interface Props {
 export function InventoryDetail({ record, onUpdate, onClose }: Props) {
   const router = useRouter();
   const { worker } = useWorker();
+  const { lines } = usePhoneLines();
+
+  // sequence_number → phone_number 맵
+  const seqPhoneMap = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const l of lines) {
+      if (l.phone_number) m.set(l.sequence_number, l.phone_number);
+    }
+    return m;
+  }, [lines]);
   const remaining = record.ordered_quantity - record.received_quantity;
   const isComplete = record.status === "완료";
 
@@ -156,24 +167,32 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
         </CardContent>
       </Card>
 
-      {/* 할당 회선 체크리스트 */}
+      {/* 할당 회선 목록 */}
       {record.allocated_phone_ids?.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">할당 회선 ({record.allocated_phone_ids.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8">
+            <div className="space-y-1.5">
               {[...record.allocated_phone_ids]
                 .sort((a, b) => a - b)
-                .map((seq) => (
-                  <div
-                    key={seq}
-                    className="flex h-10 items-center justify-center rounded-lg border border-border bg-secondary text-sm font-bold tabular-nums"
-                  >
-                    #{seq}
-                  </div>
-                ))}
+                .map((seq) => {
+                  const phone = seqPhoneMap.get(seq);
+                  return (
+                    <div
+                      key={seq}
+                      className="flex items-center justify-between rounded-lg border border-border bg-secondary px-3 py-2"
+                    >
+                      <span className="text-sm font-bold tabular-nums text-primary">#{seq}</span>
+                      {phone ? (
+                        <span className="text-sm tabular-nums text-foreground">{phone}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">번호 미등록</span>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           </CardContent>
         </Card>
