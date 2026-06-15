@@ -13,8 +13,12 @@ let cache: TokenCache | null = null;
 export async function getNaverToken(): Promise<string> {
   if (cache && Date.now() < cache.expiresAt - 60_000) return cache.token;
 
-  const clientId = process.env.NAVER_CLIENT_ID!;
-  const clientSecret = process.env.NAVER_CLIENT_SECRET!;
+  const clientId = (process.env.NAVER_CLIENT_ID ?? "").trim();
+  const clientSecret = (process.env.NAVER_CLIENT_SECRET ?? "").trim();
+
+  if (!clientId || !clientSecret) {
+    throw new Error("NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 미설정");
+  }
 
   const timestamp = Date.now().toString();
   const password = `${clientId}_${timestamp}`;
@@ -28,7 +32,14 @@ export async function getNaverToken(): Promise<string> {
     `&client_secret_sign=${encodeURIComponent(sign)}` +
     `&type=SELF`;
 
-  console.info("[Naver Auth] timestamp:", timestamp, "sign:", sign);
+  // 디버그: 시크릿 길이 및 sign 확인 (시크릿 자체는 노출하지 않음)
+  console.info(
+    "[Naver Auth] clientId:", clientId,
+    "| secretLen:", clientSecret.length,
+    "| secretStart:", clientSecret.slice(0, 7),
+    "| timestamp:", timestamp,
+    "| sign:", sign,
+  );
 
   const res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
     method: "POST",
