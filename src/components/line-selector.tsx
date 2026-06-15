@@ -118,12 +118,10 @@ export function LineSelector({
           const isSelected = selected.has(seq);
           const isReco = recoSet.has(seq);
           const disabled = !line.is_active;
-          // alias 우선, 없으면 010 제외 8자리 (예: 12345678)
-          const phoneLabel =
-            line.alias?.trim() ||
-            (line.phone_number
-              ? line.phone_number.replace(/\D/g, "").slice(3) // 010 제거 → 8자리
-              : null);
+          // phone_number 우선(010 제외 8자리), 없으면 alias 폴백
+          const phoneLabel = line.phone_number
+            ? line.phone_number.replace(/\D/g, "").slice(3) // 010 제거 → 8자리
+            : (line.alias?.trim() ?? null);
           return (
             <button
               key={seq}
