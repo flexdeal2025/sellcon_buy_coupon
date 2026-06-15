@@ -97,18 +97,14 @@ export function SmartstorePanel() {
   }, [fetchData]);
 
   async function handleSync() {
+    // 네이버 API는 등록된 IP에서만 호출 가능 — Vercel은 고정 IP가 없어 서버에서 호출 불가.
+    // 동기화는 IP가 등록된 본인 PC에서 `npm run sync` 로 실행한 뒤, 여기서 새로고침한다.
+    toast.info("동기화는 PC 터미널에서 'npm run sync' 로 실행하세요. 완료 후 아래 데이터가 갱신됩니다.", {
+      duration: 7000,
+    });
     setSyncing(true);
-    try {
-      const res = await fetch("/api/smartstore/sync");
-      const data = (await res.json()) as { ok: boolean; error?: string; synced?: { products: number; lowStock: number } };
-      if (!data.ok) throw new Error(data.error ?? "동기화 실패");
-      toast.success(`동기화 완료 — 상품 ${data.synced?.products}개, 재고임박 ${data.synced?.lowStock}건`);
-      await fetchData();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "동기화 오류");
-    } finally {
-      setSyncing(false);
-    }
+    await fetchData();
+    setSyncing(false);
   }
 
   async function handleAnalyze() {
@@ -146,7 +142,7 @@ export function SmartstorePanel() {
       <div className="grid grid-cols-2 gap-2">
         <Button onClick={handleSync} disabled={syncing} variant="outline">
           {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          재고 동기화
+          데이터 새로고침
         </Button>
         <Button onClick={handleAnalyze} disabled={analyzing}>
           {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
