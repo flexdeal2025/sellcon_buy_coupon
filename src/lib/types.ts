@@ -46,6 +46,7 @@ export interface PurchaseRecord {
   status: PurchaseStatus;
   status_updated_by: string | null;
   delivery_logs: DeliveryLog[];
+  checked_phone_ids: number[]; // 쿠폰 발송 확인 완료된 회선 sequence_number 목록
   notes: string | null;
   created_at: string;
 }

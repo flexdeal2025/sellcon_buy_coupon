@@ -137,6 +137,7 @@ export default function NewPurchasePage() {
       status: "매입등록",
       status_updated_by: worker,
       delivery_logs: [],
+      checked_phone_ids: [],
       notes: notes.trim() || null,
     };
 

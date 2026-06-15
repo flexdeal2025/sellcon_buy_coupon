@@ -26,6 +26,8 @@ import {
   Phone,
   Loader2,
   Pencil,
+  CircleCheck,
+  Circle,
 } from "lucide-react";
 
 interface Props {
@@ -167,11 +169,32 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
         </CardContent>
       </Card>
 
-      {/* 할당 회선 목록 */}
+      {/* 할당 회선 확인 체크리스트 */}
       {record.allocated_phone_ids?.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">할당 회선 ({record.allocated_phone_ids.length})</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">할당 회선 확인</CardTitle>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    "text-sm font-bold tabular-nums",
+                    (record.checked_phone_ids?.length ?? 0) === record.allocated_phone_ids.length
+                      ? "text-success"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {record.checked_phone_ids?.length ?? 0} / {record.allocated_phone_ids.length}
+                </span>
+                <span className="text-xs text-muted-foreground">확인 완료</span>
+              </div>
+            </div>
+            {(record.checked_phone_ids?.length ?? 0) === record.allocated_phone_ids.length && (
+              <p className="mt-1 flex items-center gap-1 text-xs font-medium text-success">
+                <CircleCheck className="h-3.5 w-3.5" />
+                모든 회선 쿠폰 확인 완료
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-1.5">
@@ -179,18 +202,48 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
                 .sort((a, b) => a - b)
                 .map((seq) => {
                   const phone = seqPhoneMap.get(seq);
+                  const isChecked = (record.checked_phone_ids ?? []).includes(seq);
                   return (
-                    <div
+                    <button
                       key={seq}
-                      className="flex items-center justify-between rounded-lg border border-border bg-secondary px-3 py-2"
-                    >
-                      <span className="text-sm font-bold tabular-nums text-primary">#{seq}</span>
-                      {phone ? (
-                        <span className="text-sm tabular-nums text-foreground">{phone}</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">번호 미등록</span>
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        const current = record.checked_phone_ids ?? [];
+                        const next = isChecked
+                          ? current.filter((s) => s !== seq)
+                          : [...current, seq];
+                        setBusy(true);
+                        try {
+                          await onUpdate(record.id, { checked_phone_ids: next });
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "저장 실패");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors active:scale-[0.99]",
+                        isChecked
+                          ? "border-success/40 bg-success/8 text-foreground"
+                          : "border-border bg-secondary text-foreground hover:border-primary/30",
                       )}
-                    </div>
+                    >
+                      {isChecked ? (
+                        <CircleCheck className="h-5 w-5 shrink-0 text-success" />
+                      ) : (
+                        <Circle className="h-5 w-5 shrink-0 text-muted-foreground/40" />
+                      )}
+                      <span className="font-bold tabular-nums text-primary">#{seq}</span>
+                      {phone ? (
+                        <span className="flex-1 tabular-nums">{phone}</span>
+                      ) : (
+                        <span className="flex-1 text-xs text-muted-foreground">번호 미등록</span>
+                      )}
+                      {isChecked && (
+                        <span className="text-xs font-medium text-success">확인</span>
+                      )}
+                    </button>
                   );
                 })}
             </div>
