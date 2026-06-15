@@ -8,7 +8,12 @@ import { formatSequenceRanges } from "@/lib/rotation";
 
 interface LineSelectorProps {
   /** 표시할 회선 목록 (sequence_number 오름차순) */
-  lines: { sequence_number: number; is_active: boolean }[];
+  lines: {
+    sequence_number: number;
+    is_active: boolean;
+    phone_number?: string | null;
+    alias?: string | null;
+  }[];
   /** 선택된 sequence_number 배열 */
   value: number[];
   onChange: (next: number[]) => void;
@@ -113,6 +118,10 @@ export function LineSelector({
           const isSelected = selected.has(seq);
           const isReco = recoSet.has(seq);
           const disabled = !line.is_active;
+          // 전화번호 뒷 4자리 또는 alias 를 부제목으로 표시
+          const phoneLabel =
+            line.alias?.trim() ||
+            (line.phone_number ? line.phone_number.replace(/\D/g, "").slice(-4) : null);
           return (
             <button
               key={seq}
@@ -120,7 +129,7 @@ export function LineSelector({
               disabled={disabled}
               onClick={() => toggle(seq)}
               className={cn(
-                "relative flex h-11 items-center justify-center rounded-lg border text-sm font-bold tabular-nums transition-all active:scale-95",
+                "relative flex h-[52px] flex-col items-center justify-center gap-0.5 rounded-lg border text-sm font-bold tabular-nums transition-all active:scale-95",
                 disabled &&
                   "cursor-not-allowed border-dashed border-border bg-muted text-muted-foreground/40 line-through",
                 !disabled &&
@@ -136,7 +145,17 @@ export function LineSelector({
                   "border-border bg-background text-foreground hover:border-primary/40",
               )}
             >
-              {seq}
+              <span className="leading-none">{seq}</span>
+              {phoneLabel && (
+                <span
+                  className={cn(
+                    "text-[9px] leading-none tabular-nums",
+                    isSelected ? "opacity-80" : "opacity-50",
+                  )}
+                >
+                  {phoneLabel}
+                </span>
+              )}
               {isReco && !isSelected && !disabled && (
                 <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary" />
               )}
@@ -145,7 +164,7 @@ export function LineSelector({
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        점선/취소선 번호는 비활성 회선입니다. 파란 점은 추천 번호를 의미합니다.
+        버튼 아래 숫자는 전화번호 뒷 4자리입니다. 점선/취소선은 비활성 회선, 파란 점은 추천 번호입니다.
       </p>
     </div>
   );

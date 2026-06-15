@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import {
   Clock,
   Phone,
   Loader2,
+  Pencil,
 } from "lucide-react";
 
 interface Props {
@@ -32,6 +34,7 @@ interface Props {
 }
 
 export function InventoryDetail({ record, onUpdate, onClose }: Props) {
+  const router = useRouter();
   const { worker } = useWorker();
   const remaining = record.ordered_quantity - record.received_quantity;
   const isComplete = record.status === "완료";
@@ -109,11 +112,21 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
       <Card>
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-2">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-bold">{record.supplier}</p>
               <p className="text-sm text-muted-foreground">{record.product_name}</p>
             </div>
-            <StatusBadge status={record.status} />
+            <div className="flex shrink-0 items-center gap-2">
+              <StatusBadge status={record.status} />
+              <button
+                type="button"
+                onClick={() => router.push(`/edit/${record.id}`)}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                title="매입 수정"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center">
             <Stat label="주문" value={`${record.ordered_quantity}`} />

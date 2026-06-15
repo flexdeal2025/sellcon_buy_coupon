@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { toast } from "sonner";
 import { useRecords } from "@/hooks/use-records";
 import { usePhoneLines } from "@/hooks/use-phone-lines";
@@ -22,26 +22,27 @@ import {
 import { LineSelector } from "@/components/line-selector";
 import { WorkerPicker } from "@/components/worker-picker";
 import { reconcile, type CalcSource } from "@/lib/calc";
-import {
-  getLastUsedHighest,
-  recommendRotation,
-  requiredLineCount,
-  formatSequenceRanges,
-} from "@/lib/rotation";
 import { formatKRW, formatUnitPrice, toDateInput } from "@/lib/utils";
-import { sendTelegram } from "@/lib/notify";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { EVIDENCE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { PurchaseInsert } from "@/lib/types";
-import { Calculator, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, Calculator, Save, Loader2 } from "lucide-react";
 
-export default function NewPurchasePage() {
+export default function EditPurchasePage() {
   const router = useRouter();
-  const { records, insert } = useRecords();
+  const params = useParams<{ id: string }>();
+  const id = params.id;
+
+  const { records, update } = useRecords();
   const { lines } = usePhoneLines();
   const { suppliers, products } = usePresets();
   const { worker } = useWorker();
+
+  // 원본 레코드
+  const record = useMemo(() => records.find((r) => r.id === id) ?? null, [records, id]);
+
+  // 폼 상태 — record 로드 후 초기화 (초기값은 record 또는 빈값)
+  const initialized = useRef(false);
 
   const [date, setDate] = useState(toDateInput());
   const [supplier, setSupplier] = useState("");
@@ -56,40 +57,35 @@ export default function NewPurchasePage() {
   const [selectedLines, setSelectedLines] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
-  const productInputRef = useRef<HTMLInputElement>(null);
+
+  // record 로드 되면 한 번만 초기화
+  if (record && !initialized.current) {
+    initialized.current = true;
+    setDate(record.purchase_date ?? toDateInput());
+    setSupplier(record.supplier ?? "");
+    setProductName(record.product_name ?? "");
+    setOrderedQty(record.ordered_quantity ? String(record.ordered_quantity) : "");
+    setLimitPer(record.limit_per_number ? String(record.limit_per_number) : "");
+    setUnitPrice(record.unit_price ? String(record.unit_price) : "");
+    setTotalPrice(record.total_price ? String(record.total_price) : "");
+    setAccountEmail(record.account_email ?? "");
+    setEvidence(record.evidence_type ?? "");
+    setNotes(record.notes ?? "");
+    setSelectedLines(record.allocated_phone_ids ?? []);
+  }
 
   const qtyNum = Number(orderedQty) || 0;
   const limitNum = Number(limitPer) || 0;
-  const needCount = requiredLineCount(qtyNum, limitNum);
 
-  // 상품명 자동완성 후보 (입력값으로 필터링)
+  // 상품명 자동완성
   const productSuggestions = useMemo(() => {
     const q = productName.toLowerCase().trim();
     if (!q) return products.slice(0, 12);
     return products.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
   }, [products, productName]);
 
-  // 활성 회선 sequence 목록
-  const activeSeqs = useMemo(
-    () => lines.filter((l) => l.is_active).map((l) => l.sequence_number),
-    [lines],
-  );
-
-  // 순환 추천
-  const suggestion = useMemo(() => {
-    if (!supplier || needCount <= 0)
-      return { sequences: [] as number[], start: null, wrapped: false, enough: true };
-    const lastHighest = getLastUsedHighest(records, supplier);
-    return recommendRotation(activeSeqs, lastHighest, needCount);
-  }, [supplier, needCount, records, activeSeqs]);
-
-  // ── 양방향 계산기 ──
-  function recompute(
-    q: number,
-    u: number,
-    t: number,
-    source: CalcSource,
-  ) {
+  // 양방향 계산기
+  function recompute(q: number, u: number, t: number, source: CalcSource) {
     const { unitPrice: nu, totalPrice: nt } = reconcile(q, u, t, source);
     setUnitPrice(nu ? String(nu) : "");
     setTotalPrice(nt ? String(nt) : "");
@@ -98,7 +94,6 @@ export default function NewPurchasePage() {
   function onQtyChange(v: string) {
     setOrderedQty(v);
     const q = Number(v) || 0;
-    // 단가 우선으로 총액 재계산 (단가가 있으면)
     if (unitPrice) recompute(q, Number(unitPrice) || 0, Number(totalPrice) || 0, "unit");
     else if (totalPrice)
       recompute(q, Number(unitPrice) || 0, Number(totalPrice) || 0, "total");
@@ -112,58 +107,74 @@ export default function NewPurchasePage() {
     recompute(qtyNum, Number(unitPrice) || 0, Number(v) || 0, "total");
   }
 
-  const canSave =
-    supplier.trim() && productName.trim() && qtyNum > 0 && !saving;
+  const canSave = supplier.trim() && productName.trim() && qtyNum > 0 && !saving;
 
   async function handleSave() {
-    if (!canSave) return;
+    if (!canSave || !record) return;
     if (!isSupabaseConfigured) {
       toast.error("Supabase 환경변수가 설정되지 않아 저장할 수 없습니다.");
       return;
     }
     setSaving(true);
-    const payload: PurchaseInsert = {
-      purchase_date: date,
-      supplier: supplier.trim(),
-      product_name: productName.trim(),
-      ordered_quantity: qtyNum,
-      received_quantity: 0,
-      limit_per_number: limitNum,
-      allocated_phone_ids: selectedLines,
-      unit_price: Number(unitPrice) || 0,
-      total_price: Number(totalPrice) || 0,
-      account_email: accountEmail.trim() || null,
-      evidence_type: evidence || null,
-      status: "매입등록",
-      status_updated_by: worker,
-      delivery_logs: [],
-      notes: notes.trim() || null,
-    };
-
     try {
-      await insert(payload);
-      // 텔레그램 알림 (실패해도 무시)
-      void sendTelegram({
-        type: "new_purchase",
-        supplier: payload.supplier,
-        product_name: payload.product_name,
-        ordered_quantity: payload.ordered_quantity,
-        sequences: formatSequenceRanges(selectedLines),
-        total_price: payload.total_price,
-        worker,
+      await update(record.id, {
+        purchase_date: date,
+        supplier: supplier.trim(),
+        product_name: productName.trim(),
+        ordered_quantity: qtyNum,
+        limit_per_number: limitNum,
+        allocated_phone_ids: selectedLines,
+        unit_price: Number(unitPrice) || 0,
+        total_price: Number(totalPrice) || 0,
+        account_email: accountEmail.trim() || null,
+        evidence_type: evidence || null,
+        notes: notes.trim() || null,
+        status_updated_by: worker,
       });
-      toast.success("매입이 등록되었습니다.");
-      router.push("/");
+      toast.success("매입 정보가 수정되었습니다.");
+      router.back();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "저장 실패");
       setSaving(false);
     }
   }
 
+  // 로딩 중
+  if (records.length === 0) {
+    return (
+      <div className="flex justify-center py-16 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    );
+  }
+
+  // 없는 ID
+  if (!record) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" className="-ml-2" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+          뒤로
+        </Button>
+        <p className="text-sm text-destructive">해당 매입 건을 찾을 수 없습니다.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 pb-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">매입 입력</h1>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-xl font-bold">매입 수정</h1>
+        </div>
         <WorkerPicker />
       </div>
 
@@ -175,11 +186,7 @@ export default function NewPurchasePage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>매입처</Label>
-            <ChipRow
-              items={suppliers}
-              active={supplier}
-              onPick={(v) => setSupplier(v)}
-            />
+            <ChipRow items={suppliers} active={supplier} onPick={setSupplier} />
             <Input
               placeholder="매입처명 입력"
               value={supplier}
@@ -190,7 +197,6 @@ export default function NewPurchasePage() {
             <Label>상품명</Label>
             <div className="relative">
               <Input
-                ref={productInputRef}
                 placeholder="키워드 입력 (예: cu, 스타벅스)"
                 value={productName}
                 onChange={(e) => {
@@ -294,7 +300,6 @@ export default function NewPurchasePage() {
             </div>
           </div>
 
-          {/* 계산 결과 미리보기 */}
           <div className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2.5 text-sm">
             <span className="text-muted-foreground">
               단가 {formatUnitPrice(Number(unitPrice) || 0)} × {qtyNum}개
@@ -303,41 +308,19 @@ export default function NewPurchasePage() {
               = {formatKRW(Number(totalPrice) || 0)}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            단가↔총액은 자동 양방향 계산됩니다. (총액÷수량으로 단가가 소수점까지
-            역산됩니다)
-          </p>
         </CardContent>
       </Card>
 
       {/* 회선 할당 */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">회선 할당 (순환 추천)</CardTitle>
+          <CardTitle className="text-base">회선 할당</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {needCount > 0 && (
-            <div className="rounded-lg bg-accent px-3 py-2 text-sm text-accent-foreground">
-              주문 {qtyNum}개 ÷ 제한 {limitNum}개 ={" "}
-              <span className="font-bold">필요 회선 {needCount}개</span>
-            </div>
-          )}
-          {!supplier && (
-            <p className="text-sm text-muted-foreground">
-              매입처를 선택하면 직전 기록 기반 순환 추천이 표시됩니다.
-            </p>
-          )}
-          {supplier && needCount > 0 && !suggestion.enough && (
-            <p className="text-sm font-medium text-destructive">
-              활성 회선이 부족합니다. (활성 {activeSeqs.length}개 / 필요 {needCount}개)
-            </p>
-          )}
+        <CardContent>
           <LineSelector
             lines={lines}
             value={selectedLines}
             onChange={setSelectedLines}
-            recommended={suggestion.sequences}
-            requiredCount={needCount || undefined}
           />
         </CardContent>
       </Card>
@@ -386,7 +369,7 @@ export default function NewPurchasePage() {
         </CardContent>
       </Card>
 
-      {/* 저장 (모바일 하단 고정) */}
+      {/* 저장 버튼 */}
       <div className="sticky bottom-20 z-20 sm:bottom-2">
         <Button
           size="xl"
@@ -399,7 +382,7 @@ export default function NewPurchasePage() {
           ) : (
             <Save className="h-5 w-5" />
           )}
-          매입 등록 ({formatKRW(Number(totalPrice) || 0)})
+          수정 저장 ({formatKRW(Number(totalPrice) || 0)})
         </Button>
       </div>
     </div>
