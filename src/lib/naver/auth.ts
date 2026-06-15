@@ -20,18 +20,20 @@ export async function getNaverToken(): Promise<string> {
   const password = `${clientId}_${timestamp}`;
   const sign = crypto.createHmac("sha256", clientSecret).update(password).digest("base64");
 
-  const body = new URLSearchParams({
-    client_id: clientId,
-    timestamp,
-    client_secret_sign: sign,
-    grant_type: "client_credentials",
-    type: "SELF",
-  });
+  // URLSearchParams 대신 직접 구성 — base64 서명의 +/= 를 명시적으로 인코딩
+  const body =
+    `grant_type=client_credentials` +
+    `&client_id=${encodeURIComponent(clientId)}` +
+    `&timestamp=${timestamp}` +
+    `&client_secret_sign=${encodeURIComponent(sign)}` +
+    `&type=SELF`;
+
+  console.info("[Naver Auth] timestamp:", timestamp, "sign:", sign);
 
   const res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
+    body,
   });
 
   if (!res.ok) {
