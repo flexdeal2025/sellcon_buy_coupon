@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/smartstore/sync",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/smartstore/analyze",
+      "schedule": "0 8 * * *"
+    }
+  ]
+}
