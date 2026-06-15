@@ -21,31 +21,44 @@ export async function getNaverToken(): Promise<string> {
   }
 
   const timestamp = Date.now().toString();
-  const password = `${clientId}_${timestamp}`;
-  const sign = crypto.createHmac("sha256", clientSecret).update(password).digest("base64");
 
-  // URLSearchParams 대신 직접 구성 — base64 서명의 +/= 를 명시적으로 인코딩
-  const body =
+  // 네이버 API는 두 가지 서명 메시지 형식을 사용함 — 먼저 공식 형식 시도
+  const makeSign = (msg: string) =>
+    crypto.createHmac("sha256", clientSecret).update(msg).digest("base64");
+
+  const signFull = makeSign(`${clientId}_${timestamp}`); // 공식 문서 형식
+  const signTs   = makeSign(timestamp);                  // 타임스탬프만
+
+  const makeBody = (sign: string) =>
     `grant_type=client_credentials` +
     `&client_id=${encodeURIComponent(clientId)}` +
     `&timestamp=${timestamp}` +
     `&client_secret_sign=${encodeURIComponent(sign)}` +
     `&type=SELF`;
 
-  // 디버그: 시크릿 길이 및 sign 확인 (시크릿 자체는 노출하지 않음)
   console.info(
-    "[Naver Auth] clientId:", clientId,
-    "| secretLen:", clientSecret.length,
-    "| secretStart:", clientSecret.slice(0, 7),
-    "| timestamp:", timestamp,
-    "| sign:", sign,
+    "[Naver Auth] secretLen:", clientSecret.length,
+    "| signFull:", signFull,
+    "| signTs:", signTs,
   );
 
-  const res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
+  // 1차 시도: clientId_timestamp 서명
+  let res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
+    body: makeBody(signFull),
   });
+
+  // 실패 시 2차 시도: timestamp만 서명
+  if (!res.ok) {
+    const errText = await res.text();
+    console.warn("[Naver Auth] 1차 시도 실패, timestamp 단독 서명으로 재시도:", errText);
+    res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: makeBody(signTs),
+    });
+  }
 
   if (!res.ok) {
     const text = await res.text();
