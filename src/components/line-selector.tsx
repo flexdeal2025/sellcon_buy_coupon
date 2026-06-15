@@ -118,10 +118,12 @@ export function LineSelector({
           const isSelected = selected.has(seq);
           const isReco = recoSet.has(seq);
           const disabled = !line.is_active;
-          // 전화번호 뒷 4자리 또는 alias 를 부제목으로 표시
+          // alias 우선, 없으면 010 제외 8자리 (예: 12345678)
           const phoneLabel =
             line.alias?.trim() ||
-            (line.phone_number ? line.phone_number.replace(/\D/g, "").slice(-4) : null);
+            (line.phone_number
+              ? line.phone_number.replace(/\D/g, "").slice(3) // 010 제거 → 8자리
+              : null);
           return (
             <button
               key={seq}
@@ -149,7 +151,7 @@ export function LineSelector({
               {phoneLabel && (
                 <span
                   className={cn(
-                    "text-[9px] leading-none tabular-nums",
+                    "text-[8px] leading-none tracking-tighter tabular-nums",
                     isSelected ? "opacity-80" : "opacity-50",
                   )}
                 >
