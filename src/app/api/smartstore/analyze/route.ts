@@ -83,7 +83,7 @@ export async function GET(req: Request) {
 
     // Gemini 분석 요청
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `당신은 대한민국 기프티콘 대량 매입·재판매 비즈니스의 전문 마케팅 전략가입니다.
 스마트스토어 판매 데이터와 최근 매입 이력을 분석하여 전략적 인사이트를 제공해주세요.
@@ -111,7 +111,7 @@ ${JSON.stringify(purchases ?? [], null, 2)}
     await supabase.from("ai_analysis_reports").insert({
       report_date: now.toISOString().substring(0, 10),
       report_text: reportText,
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
     });
 
     // 텔레그램 발송
