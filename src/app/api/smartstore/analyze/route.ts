@@ -7,12 +7,6 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
-  const cronSecret =
-    req.headers.get("x-cron-secret") ?? new URL(req.url).searchParams.get("secret");
-  if (process.env.NODE_ENV === "production" && cronSecret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
-
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({

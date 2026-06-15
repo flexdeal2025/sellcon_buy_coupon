@@ -7,12 +7,6 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
-  // Vercel Cron 또는 수동 호출 시 secret 검증
-  const cronSecret = req.headers.get("x-cron-secret") ?? new URL(req.url).searchParams.get("secret");
-  if (process.env.NODE_ENV === "production" && cronSecret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
-
   if (!process.env.NAVER_CLIENT_ID || !process.env.NAVER_CLIENT_SECRET) {
     return NextResponse.json({ ok: false, error: "NAVER_CLIENT_ID / SECRET 미설정" });
   }
