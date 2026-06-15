@@ -28,6 +28,7 @@ import {
   Pencil,
   CircleCheck,
   Circle,
+  Copy,
 } from "lucide-react";
 
 interface Props {
@@ -175,7 +176,7 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">할당 회선 확인</CardTitle>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <span
                   className={cn(
                     "text-sm font-bold tabular-nums",
@@ -187,6 +188,30 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
                   {record.checked_phone_ids?.length ?? 0} / {record.allocated_phone_ids.length}
                 </span>
                 <span className="text-xs text-muted-foreground">확인 완료</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const phoneNumbers = [...record.allocated_phone_ids]
+                      .sort((a, b) => a - b)
+                      .map((seq) => seqPhoneMap.get(seq))
+                      .filter(Boolean)
+                      .join("\n");
+                    if (!phoneNumbers) {
+                      toast.error("복사할 전화번호가 없습니다.");
+                      return;
+                    }
+                    navigator.clipboard.writeText(phoneNumbers).then(() => {
+                      toast.success(`${record.allocated_phone_ids.length}개 번호 복사됨`);
+                    }).catch(() => {
+                      toast.error("복사 실패 — 브라우저 권한을 확인하세요.");
+                    });
+                  }}
+                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                  title="전화번호 전체 복사"
+                >
+                  <Copy className="h-3 w-3" />
+                  복사
+                </button>
               </div>
             </div>
             {(record.checked_phone_ids?.length ?? 0) === record.allocated_phone_ids.length && (
