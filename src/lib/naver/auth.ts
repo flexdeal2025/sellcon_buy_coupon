@@ -22,12 +22,17 @@ export async function getNaverToken(): Promise<string> {
 
   const timestamp = Date.now().toString();
 
-  // 네이버 API는 두 가지 서명 메시지 형식을 사용함 — 먼저 공식 형식 시도
-  const makeSign = (msg: string) =>
-    crypto.createHmac("sha256", clientSecret).update(msg).digest("base64");
+  const hmac = (msg: string, enc: "base64" | "hex" | "base64url") =>
+    crypto.createHmac("sha256", clientSecret).update(msg).digest(enc);
 
-  const signFull = makeSign(`${clientId}_${timestamp}`); // 공식 문서 형식
-  const signTs   = makeSign(timestamp);                  // 타임스탬프만
+  // 시도 순서: base64(공식), hex, base64url, base64(timestamp만)
+  const candidates = [
+    { label: "base64/full",     sign: hmac(`${clientId}_${timestamp}`, "base64") },
+    { label: "hex/full",        sign: hmac(`${clientId}_${timestamp}`, "hex") },
+    { label: "base64url/full",  sign: hmac(`${clientId}_${timestamp}`, "base64url") },
+    { label: "base64/ts-only",  sign: hmac(timestamp, "base64") },
+    { label: "hex/ts-only",     sign: hmac(timestamp, "hex") },
+  ];
 
   const makeBody = (sign: string) =>
     `grant_type=client_credentials` +
@@ -36,38 +41,30 @@ export async function getNaverToken(): Promise<string> {
     `&client_secret_sign=${encodeURIComponent(sign)}` +
     `&type=SELF`;
 
-  console.info(
-    "[Naver Auth] secretLen:", clientSecret.length,
-    "| signFull:", signFull,
-    "| signTs:", signTs,
-  );
+  console.info("[Naver Auth] secretLen:", clientSecret.length, "| timestamp:", timestamp);
 
-  // 1차 시도: clientId_timestamp 서명
-  let res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: makeBody(signFull),
-  });
-
-  // 실패 시 2차 시도: timestamp만 서명
-  if (!res.ok) {
-    const errText = await res.text();
-    console.warn("[Naver Auth] 1차 시도 실패, timestamp 단독 서명으로 재시도:", errText);
-    res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
+  let lastErr = "";
+  for (const { label, sign } of candidates) {
+    const res = await fetch(`${API_BASE}/external/v1/oauth2/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: makeBody(signTs),
+      body: makeBody(sign),
     });
+
+    if (res.ok) {
+      console.info("[Naver Auth] 성공:", label);
+      const data = (await res.json()) as { access_token: string; expires_in: number };
+      cache = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+      return cache.token;
+    }
+
+    const err = await res.text();
+    console.warn(`[Naver Auth] 실패(${label}):`, err);
+    lastErr = err;
   }
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Naver 인증 실패 (${res.status}): ${text}`);
-  }
+  throw new Error(`Naver 인증 실패 (모든 서명 방식 소진): ${lastErr}`);
 
-  const data = (await res.json()) as { access_token: string; expires_in: number };
-  cache = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-  return cache.token;
 }
 
 export { API_BASE };
