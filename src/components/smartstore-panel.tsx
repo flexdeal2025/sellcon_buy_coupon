@@ -284,9 +284,7 @@ export function SmartstorePanel() {
               <AlertTriangle className="mx-auto mb-2 h-5 w-5" />
               <p>아직 AI 분석 리포트가 없습니다.</p>
               <p className="mt-1 text-xs">
-                {process.env.NEXT_PUBLIC_HAS_AI === "1"
-                  ? "위 'AI 분석 실행' 버튼을 누르거나 매일 새벽 자동 실행됩니다."
-                  : "Vercel에 ANTHROPIC_API_KEY 등록 후 사용 가능합니다."}
+  Vercel에 GEMINI_API_KEY 등록 후 사용 가능합니다. (무료)
               </p>
             </div>
           )}
