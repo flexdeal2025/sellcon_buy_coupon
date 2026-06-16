@@ -151,11 +151,21 @@ async function getOrdersLast30Days(token) {
       const po = row.productOrder ?? {};
       const ord = row.order ?? {};
       out.push({
+        productOrderId: po.productOrderId ?? "",
         paymentDate: ord.paymentDate ?? po.paymentDate ?? "",
         channelProductNo: Number(po.productId ?? po.channelProductNo ?? 0),
         productName: po.productName ?? "",
         quantity: po.quantity ?? 0,
         amount: po.totalPaymentAmount ?? (po.unitPrice ?? 0) * (po.quantity ?? 0),
+        // 정산(손익)용 필드
+        settleAmount: po.expectedSettlementAmount ?? null, // 수수료 차감 실수령
+        commission:
+          (po.paymentCommission ?? 0) +
+          (po.saleCommission ?? 0) +
+          (po.knowledgeShoppingSellingInterlockCommission ?? 0) +
+          (po.channelCommission ?? 0),
+        orderStatus: po.productOrderStatus ?? "",
+        decisionDate: (po.decisionDate ?? "").substring(0, 10) || null, // 구매확정일
       });
     }
     await sleep(800);
@@ -208,11 +218,19 @@ async function main() {
   }
   console.log(`   상품 ${products.length}개`);
 
-  // 2. 주문 집계 (실패해도 상품 동기화는 유지)
+  // 2. 주문 수집 (1회) — 판매집계와 정산수집이 공유
+  let orders = [];
+  try {
+    console.log("🛒 주문 수집 중...");
+    orders = await getOrdersLast30Days(token);
+    console.log(`   주문 ${orders.length}건 수집`);
+  } catch (e) {
+    console.warn(`   ⚠️ 주문 수집 건너뜀: ${e.message}`);
+  }
+
+  // 2a. 판매 집계 (일별·상품별, 결제일 기준)
   let salesCount = 0;
   try {
-    console.log("🛒 주문 동기화 중...");
-    const orders = await getOrdersLast30Days(token);
     const salesMap = new Map();
     for (const o of orders) {
       const date = (o.paymentDate ?? "").substring(0, 10);
@@ -242,9 +260,40 @@ async function main() {
       if (error) throw new Error(`판매 집계 upsert 실패: ${error.message}`);
     }
     salesCount = salesMap.size;
-    console.log(`   주문 집계 ${salesCount}건`);
+    console.log(`   판매 집계 ${salesCount}건`);
   } catch (e) {
-    console.warn(`   ⚠️ 주문 동기화 건너뜀: ${e.message}`);
+    console.warn(`   ⚠️ 판매 집계 건너뜀: ${e.message}`);
+  }
+
+  // 2b. 정산 수집 (건별, 손익용) — 상품주문번호 단위로 upsert
+  let settleCount = 0;
+  try {
+    const rows = orders
+      .filter((o) => o.productOrderId && o.channelProductNo)
+      .map((o) => ({
+        product_order_id: o.productOrderId,
+        channel_product_no: o.channelProductNo,
+        product_name: o.productName,
+        quantity: o.quantity ?? 0,
+        payment_amount: o.amount ?? 0,
+        settle_amount: o.settleAmount, // null 가능(정산정보 없는 상태)
+        commission: o.commission ?? 0,
+        order_status: o.orderStatus ?? "",
+        decision_date: o.decisionDate, // null 가능(미확정)
+        payment_date: (o.paymentDate ?? "").substring(0, 10) || null,
+        synced_at: now,
+      }));
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const { error } = await supabase
+        .from("smartstore_settlements")
+        .upsert(chunk, { onConflict: "product_order_id" });
+      if (error) throw new Error(`정산 upsert 실패: ${error.message}`);
+    }
+    settleCount = rows.length;
+    console.log(`   정산 수집 ${settleCount}건`);
+  } catch (e) {
+    console.warn(`   ⚠️ 정산 수집 건너뜀: ${e.message}`);
   }
 
   // 3. 재고 임박 알림
@@ -270,7 +319,7 @@ async function main() {
   }
 
   console.log(
-    `\n✅ 동기화 완료 — 상품 ${products.length}개 / 주문집계 ${salesCount}건 / 재고임박 ${lowStock.length}건`,
+    `\n✅ 동기화 완료 — 상품 ${products.length}개 / 판매집계 ${salesCount}건 / 정산 ${settleCount}건 / 재고임박 ${lowStock.length}건`,
   );
 }
 

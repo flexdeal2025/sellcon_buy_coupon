@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "sync": "node --env-file=.env.local scripts/sync-smartstore.mjs",
-    "analyze": "node --env-file=.env.local scripts/analyze-smartstore.mjs"
+    "analyze": "node --env-file=.env.local scripts/analyze-smartstore.mjs",
+    "probe:settle": "node --env-file=.env.local scripts/probe-settlement.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
