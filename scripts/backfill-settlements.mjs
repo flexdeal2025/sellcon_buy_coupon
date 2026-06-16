@@ -1,11 +1,12 @@
 // 과거 정산/판매 데이터 일회성 백필 스크립트.
 // 기존 sync 와 동일 로직을 임의 날짜 구간에 적용한다. UPSERT 라 중간에 멈춰도 재실행 시 안전.
 //
-// 사용:  npm run backfill -- <시작일> <종료일>
-//   예:  npm run backfill -- 2025-01-01 2026-05-31
-//   예:  npm run backfill -- 2025-06-01 2025-06-30   (월 단위 권장)
+// 사용:  npm run backfill -- <시작일> <종료일> [--safe]
+//   예:  npm run backfill -- 2025-01-01 2025-01-31          (기본 속도)
+//   예:  npm run backfill -- 2025-06-01 2025-06-30 --safe   (알림톡 간섭 방지 — API 호출 간격 3배 늘림)
 //
-// ⚠️ 알림톡과 API 공유 중 → 한가한 시간(심야)에, 가능하면 월 단위로 나눠 실행 권장.
+// ⚠️ 알림톡과 API 공유 중 → 가능하면 월 단위로 나눠 실행 권장.
+//    알림톡 발송이 있는 시간대엔 --safe 플래그 필수.
 
 import bcrypt from "bcryptjs";
 import { createClient } from "@supabase/supabase-js";
@@ -67,12 +68,23 @@ async function notify(text) {
 }
 
 async function main() {
-  const [startArg, endArg] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
+  const safe = argv.includes("--safe");
+  const dateArgs = argv.filter((a) => !a.startsWith("--"));
+  const [startArg, endArg] = dateArgs;
   if (!startArg || !endArg || !/^\d{4}-\d{2}-\d{2}$/.test(startArg) || !/^\d{4}-\d{2}-\d{2}$/.test(endArg)) {
-    console.error("사용법: npm run backfill -- <시작일 YYYY-MM-DD> <종료일 YYYY-MM-DD>");
-    console.error("  예: npm run backfill -- 2025-01-01 2026-05-31");
+    console.error("사용법: npm run backfill -- <시작일 YYYY-MM-DD> <종료일 YYYY-MM-DD> [--safe]");
+    console.error("  예: npm run backfill -- 2025-01-01 2025-01-31");
+    console.error("  예: npm run backfill -- 2025-01-01 2025-01-31 --safe   ← 알림톡 간섭 방지");
     process.exit(1);
   }
+
+  // --safe: API 호출 간격을 3배로 늘려 알림톡과의 Rate Limit 경합 최소화
+  const DELAY = {
+    pagination: safe ? 1200 : 400,   // last-changed 페이지네이션 간격
+    queryChunk: safe ? 2000 : 700,   // product-orders/query 청크 간격
+    dayEnd:     safe ? 800  : 250,   // 하루 루프 마감 간격
+  };
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -89,7 +101,7 @@ async function main() {
 
   console.log(`🔑 인증 중...`);
   const token = await getToken();
-  console.log(`✅ 인증 성공 — 백필 구간 ${startArg} ~ ${endArg} (${totalDays}일)\n`);
+  console.log(`✅ 인증 성공 — 백필 구간 ${startArg} ~ ${endArg} (${totalDays}일)${safe ? "  [⚠️ SAFE 모드 — API 간격 3배]" : ""}\n`);
 
   const salesMap = new Map(); // sale_date__channel → {qty,rev,name}
   let dayIdx = 0, totalSettle = 0, totalOrders = 0;
@@ -111,7 +123,7 @@ async function main() {
       (d.data?.lastChangeStatuses ?? []).forEach((s) => s.productOrderId && ids.add(s.productOrderId));
       moreSequence = d.data?.more?.moreSequence ?? d.data?.moreSequence ?? null;
       if (!moreSequence) break;
-      await sleep(400);
+      await sleep(DELAY.pagination);
     }
 
     // ② 상세 조회 + 정산 upsert
@@ -151,7 +163,7 @@ async function main() {
           salesMap.set(key, cur);
         }
       }
-      await sleep(700);
+      await sleep(DELAY.queryChunk);
     }
 
     // 정산 upsert (윈도우별 즉시 flush — 메모리 절약)
@@ -165,7 +177,7 @@ async function main() {
     totalSettle += daySettle;
     totalOrders += settleRows.length;
     console.log(`[${dayIdx}/${totalDays}] ${label}  주문 ${settleRows.length}건  정산 ${daySettle.toLocaleString()}원  (누적 ${totalOrders}건)`);
-    await sleep(250);
+    await sleep(DELAY.dayEnd);
   }
 
   // ③ 판매 집계 upsert
