@@ -31,6 +31,7 @@ interface Product {
   sale_price: number;
 }
 interface Settlement {
+  product_order_id: string;
   channel_product_no: number;
   product_name: string;
   quantity: number;
@@ -44,6 +45,11 @@ interface Cost {
   unit_cost: number;
   effective_from: string;
   effective_to: string | null;
+  note: string | null;
+}
+interface OrderCost {
+  product_order_id: string;
+  cost_amount: number;
   note: string | null;
 }
 
@@ -62,20 +68,22 @@ export function PnLPanel() {
   const [products, setProducts] = useState<Product[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [costs, setCosts] = useState<Cost[]>([]);
+  const [orderCosts, setOrderCosts] = useState<OrderCost[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
     const sb = getSupabaseClient();
-    const [{ data: prods }, { data: cs }] = await Promise.all([
+    const [{ data: prods }, { data: cs }, { data: ocs }] = await Promise.all([
       sb.from("smartstore_products").select("channel_product_no,name,status,sale_price").eq("status", "SALE").order("name"),
       sb.from("product_cost").select("*"),
+      sb.from("order_cost").select("*"),
     ]);
     // 정산 — 1000행 제한 회피 페이지네이션 (구매확정만)
     const setl: Settlement[] = [];
     for (let from = 0; ; from += 1000) {
       const { data } = await sb
         .from("smartstore_settlements")
-        .select("channel_product_no,product_name,quantity,settle_amount,order_status,decision_date")
+        .select("product_order_id,channel_product_no,product_name,quantity,settle_amount,order_status,decision_date")
         .eq("order_status", "PURCHASE_DECIDED")
         .order("decision_date", { ascending: true })
         .range(from, from + 999);
@@ -84,6 +92,7 @@ export function PnLPanel() {
     }
     setProducts((prods as Product[]) ?? []);
     setCosts((cs as Cost[]) ?? []);
+    setOrderCosts((ocs as OrderCost[]) ?? []);
     setSettlements(setl);
     setLoading(false);
   }, []);
@@ -101,6 +110,22 @@ export function PnLPanel() {
     }
     return m;
   }, [costs]);
+
+  const orderCostMap = useMemo(() => {
+    const m = new Map<string, OrderCost>();
+    for (const oc of orderCosts) m.set(oc.product_order_id, oc);
+    return m;
+  }, [orderCosts]);
+
+  const settlementsByProduct = useMemo(() => {
+    const m = new Map<number, Settlement[]>();
+    for (const s of settlements) {
+      const arr = m.get(s.channel_product_no) ?? [];
+      arr.push(s);
+      m.set(s.channel_product_no, arr);
+    }
+    return m;
+  }, [settlements]);
 
   if (loading) {
     return (
@@ -122,12 +147,15 @@ export function PnLPanel() {
         <Dashboard
           settlements={settlements}
           costsByProduct={costsByProduct}
+          orderCostMap={orderCostMap}
           onGoCost={() => setView("cost")}
         />
       ) : (
         <CostManager
           products={products}
           costsByProduct={costsByProduct}
+          settlementsByProduct={settlementsByProduct}
+          orderCostMap={orderCostMap}
           onChanged={loadAll}
         />
       )}
@@ -164,10 +192,12 @@ function SubTab({
 function Dashboard({
   settlements,
   costsByProduct,
+  orderCostMap,
   onGoCost,
 }: {
   settlements: Settlement[];
   costsByProduct: Map<number, Cost[]>;
+  orderCostMap: Map<string, OrderCost>;
   onGoCost: () => void;
 }) {
   const [gran, setGran] = useState<Granularity>("month");
@@ -189,12 +219,15 @@ function Dashboard({
       const pm = periodMap.get(periodKey) ?? { rev: 0, matchedRev: 0, cost: 0, missingRev: 0, missingCnt: 0 };
       pm.rev += rev;
 
-      const costRow = findCost(costsByProduct.get(s.channel_product_no), s.decision_date);
+      // 원가 우선순위: ① 건별 원가(총액) → ② 기간단가×수량 → ③ 미입력
+      const oc = orderCostMap.get(s.product_order_id);
+      const costRow = oc ? null : findCost(costsByProduct.get(s.channel_product_no), s.decision_date);
+      const costAmt = oc ? oc.cost_amount : costRow ? s.quantity * costRow.unit_cost : null;
+
       const pr = prodMap.get(s.channel_product_no) ?? { name: s.product_name, rev: 0, cost: 0, matched: false, missing: false };
       pr.rev += rev;
 
-      if (costRow) {
-        const costAmt = s.quantity * costRow.unit_cost;
+      if (costAmt != null) {
         pm.matchedRev += rev;
         pm.cost += costAmt;
         pr.cost += costAmt;
@@ -237,7 +270,7 @@ function Dashboard({
       productRank,
       missingProducts: [...missSet.entries()].map(([no, name]) => ({ no, name })),
     };
-  }, [settlements, costsByProduct, gran]);
+  }, [settlements, costsByProduct, orderCostMap, gran]);
 
   if (settlements.length === 0) {
     return (
@@ -390,10 +423,14 @@ function SummaryCard({
 function CostManager({
   products,
   costsByProduct,
+  settlementsByProduct,
+  orderCostMap,
   onChanged,
 }: {
   products: Product[];
   costsByProduct: Map<number, Cost[]>;
+  settlementsByProduct: Map<number, Settlement[]>;
+  orderCostMap: Map<string, OrderCost>;
   onChanged: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -452,10 +489,15 @@ function CostManager({
                 )}
               </button>
               {isOpen && (
-                <CardContent className="border-t border-border pt-3">
+                <CardContent className="space-y-4 border-t border-border pt-3">
                   <CostEditor
                     channelNo={p.channel_product_no}
                     periods={list ?? []}
+                    onChanged={onChanged}
+                  />
+                  <OrderCostSection
+                    orders={settlementsByProduct.get(p.channel_product_no) ?? []}
+                    orderCostMap={orderCostMap}
                     onChanged={onChanged}
                   />
                 </CardContent>
@@ -581,6 +623,162 @@ function CostEditor({
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           기간별 원가 추가
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// 주문 건별 매입원가 (별도 결제 상품 등, 주문마다 원가가 다른 경우)
+function OrderCostSection({
+  orders,
+  orderCostMap,
+  onChanged,
+}: {
+  orders: Settlement[];
+  orderCostMap: Map<string, OrderCost>;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  // 구매확정 주문 중 정산액 있는 것 — 건별원가 미입력 우선, 그다음 최근일 순
+  const list = useMemo(() => {
+    return [...orders]
+      .filter((o) => o.settle_amount != null)
+      .sort((a, b) => {
+        const am = orderCostMap.has(a.product_order_id) ? 1 : 0;
+        const bm = orderCostMap.has(b.product_order_id) ? 1 : 0;
+        if (am !== bm) return am - bm;
+        return (b.decision_date ?? "").localeCompare(a.decision_date ?? "");
+      });
+  }, [orders, orderCostMap]);
+
+  const enteredCount = list.filter((o) => orderCostMap.has(o.product_order_id)).length;
+
+  if (list.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        건별 원가: 이 상품의 구매확정 주문이 아직 없습니다.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 text-sm font-medium text-foreground"
+      >
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        건별 원가
+        <span className="text-xs font-normal text-muted-foreground">
+          ({enteredCount}/{list.length} 입력 · 주문마다 원가가 다를 때 사용)
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-1.5">
+          {list.map((o) => (
+            <OrderCostRow key={o.product_order_id} order={o} existing={orderCostMap.get(o.product_order_id)} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderCostRow({
+  order,
+  existing,
+  onChanged,
+}: {
+  order: Settlement;
+  existing: OrderCost | undefined;
+  onChanged: () => void;
+}) {
+  const [cost, setCost] = useState(existing ? String(existing.cost_amount) : "");
+  const [note, setNote] = useState(existing?.note ?? "");
+  const [busy, setBusy] = useState(false);
+
+  const settle = order.settle_amount ?? 0;
+  const costNum = Number(cost) || 0;
+  const profit = costNum > 0 ? settle - costNum : null;
+
+  async function save() {
+    const c = Number(cost);
+    if (!c || c <= 0) {
+      toast.error("매입원가를 입력하세요.");
+      return;
+    }
+    setBusy(true);
+    const { error } = await getSupabaseClient()
+      .from("order_cost")
+      .upsert(
+        { product_order_id: order.product_order_id, cost_amount: Math.round(c), note: note.trim() || null },
+        { onConflict: "product_order_id" },
+      );
+    setBusy(false);
+    if (error) {
+      toast.error(`저장 실패: ${error.message}`);
+      return;
+    }
+    toast.success("건별 원가가 저장되었습니다.");
+    onChanged();
+  }
+
+  async function remove() {
+    setBusy(true);
+    const { error } = await getSupabaseClient().from("order_cost").delete().eq("product_order_id", order.product_order_id);
+    setBusy(false);
+    if (error) {
+      toast.error(`삭제 실패: ${error.message}`);
+      return;
+    }
+    setCost("");
+    setNote("");
+    toast.success("삭제되었습니다.");
+    onChanged();
+  }
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border p-2.5",
+        existing ? "border-success/30 bg-success/5" : "border-border bg-secondary",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+        <span className="font-mono">{order.product_order_id}</span>
+        <span>{order.decision_date}</span>
+        <span>수량 {order.quantity}</span>
+        <span>정산 {formatKRW(settle)}</span>
+        {profit != null && (
+          <span className={cn("font-semibold", profit >= 0 ? "text-success" : "text-destructive")}>
+            수익 {formatKRW(profit)}
+          </span>
+        )}
+      </div>
+      <div className="mt-2 flex gap-2">
+        <Input
+          type="number"
+          inputMode="numeric"
+          placeholder="이 주문 총 매입원가"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+          className="h-9"
+        />
+        <Input
+          placeholder="협의 메모(선택)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="h-9"
+        />
+        <Button onClick={save} disabled={busy} size="sm" className="h-9 shrink-0">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+        </Button>
+        {existing && (
+          <button onClick={remove} disabled={busy} className="shrink-0 text-muted-foreground hover:text-destructive" aria-label="삭제">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );
