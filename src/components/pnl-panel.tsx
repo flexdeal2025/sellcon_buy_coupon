@@ -258,7 +258,7 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
     (async () => {
       setSummaryLoading(true);
       const sb = getSupabaseClient();
-      const params = { date_from: dateRange.from ?? undefined, date_to: dateRange.to ?? undefined };
+      const params = { date_from: dateRange.from ?? null, date_to: dateRange.to ?? null };
       const [{ data: sum }, { data: prod }] = await Promise.all([
         sb.rpc("pnl_summary", params),
         sb.rpc("pnl_by_product", { limit_n: 10, ...params }),
@@ -286,7 +286,7 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
   useEffect(() => {
     (async () => {
       setPeriodLoading(true);
-      const params = { gran, date_from: dateRange.from ?? undefined, date_to: dateRange.to ?? undefined };
+      const params = { gran, date_from: dateRange.from ?? null, date_to: dateRange.to ?? null };
       const { data } = await getSupabaseClient().rpc("pnl_by_period", params);
       setPeriods(
         ((data as Record<string, unknown>[] | null) ?? []).map((p) => ({
