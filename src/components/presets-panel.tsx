@@ -20,7 +20,7 @@ export function PresetsPanel() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        매입 입력 화면에서 원터치로 선택할 매입처/상품명을 관리합니다. (이 기기에 저장)
+        매입 입력 화면에서 원터치로 선택할 매입처/상품명을 관리합니다. (모든 기기 공유)
       </p>
       <PresetCard
         title="매입처 프리셋"
