@@ -6,7 +6,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 
 const EXCEL_PATH = process.argv[2];
 if (!EXCEL_PATH) {
