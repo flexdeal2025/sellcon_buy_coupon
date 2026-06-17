@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 /**
- * 카드내역 엑셀 → Supabase 임포트
- * 사용법: node --env-file=.env.local scripts/import-card-tax.mjs <excel_file.xlsx>
- * 예시:   npm run card-tax "C:\Users\vivay\OneDrive\세무업무\김성수대표님 2025년 카드_26.05_260528확인.xlsx"
+ * 카드내역 엑셀 → Supabase 임포트 (카드사별 시트 자동 파싱)
+ * 사용법: node --env-file=.env.local scripts/import-card-tax.mjs <excel.xlsx> [--replace]
+ *   --replace : 기존 card_transactions_tax 전체 삭제 후 적재 (납세자 교체 시)
+ *
+ * 시트 형식이 카드사·발급처마다 달라서, 컬럼은 고정 인덱스가 아니라
+ * "헤더 이름"으로 탐지한다. 헤더 줄바꿈/탭/공백은 정규화 후 비교.
+ * 헤더가 1행이 아닐 수 있어('품명' 포함 행을 헤더로 자동 탐지) 데이터 시작 위치도 가변.
  */
 
 import { createClient } from '@supabase/supabase-js';
 import XLSX from 'xlsx';
 
-const EXCEL_PATH = process.argv[2];
+const argv = process.argv.slice(2);
+const REPLACE = argv.includes('--replace');
+const DRY = argv.includes('--dry');
+const EXCEL_PATH = argv.find(a => !a.startsWith('--'));
 if (!EXCEL_PATH) {
-  console.error('사용법: npm run card-tax "<엑셀파일경로>"');
+  console.error('사용법: npm run card-tax "<엑셀파일경로>" [--replace]');
   process.exit(1);
 }
 
@@ -19,215 +26,181 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY,
 );
 
-// 기대 행 수 (검증용)
-const EXPECTED_ROWS = {
-  '국민카드': 3076,
-  '농협카드': 35,
-  '롯데카드': 2735,
-  '기업카드': 34,
-  '부산은행카드': 53,
-  '우리카드': 3997,
-  '비씨카드': 246,
-  '삼성카드': 300,
-  '신한카드': 986,
-  '하나카드': 186,
-  '현대카드': 1293,
-  '제주은행카드': 56,
-  '광주은행카드': 22,
-};
+// 공백·줄바꿈·탭·nbsp 모두 제거 (헤더 이름 비교용)
+const norm = (s) => String(s ?? '').replace(/[\s ]/g, '');
 
-// 시트명 → 카드사 매핑 (부분 매칭)
+// 시트명 → 카드사 라벨 (부분 매칭)
 function detectCompany(sheetName) {
   const map = [
-    ['국민카드', '국민카드'], ['농협카드', '농협카드'], ['롯데카드', '롯데카드'],
-    ['기업카드', '기업카드'], ['부산은행', '부산은행카드'], ['우리카드', '우리카드'],
-    ['비씨카드', '비씨카드'], ['삼성카드', '삼성카드'], ['신한카드', '신한카드'],
-    ['하나카드', '하나카드'], ['현대카드', '현대카드'], ['제주은행', '제주은행카드'],
-    ['광주은행', '광주은행카드'],
+    ['국민', '국민카드'], ['농협', '농협카드'], ['롯데', '롯데카드'],
+    ['비씨바로', '비씨바로카드'], ['기업', '기업카드'], ['부산은행', '부산은행카드'],
+    ['우리', '우리카드'], ['비씨', '비씨카드'], ['삼성', '삼성카드'],
+    ['신한', '신한카드'], ['하나', '하나카드'], ['현대', '현대카드'],
+    ['제주은행', '제주은행카드'], ['광주은행', '광주은행카드'],
   ];
   for (const [key, val] of map) {
     if (sheetName.includes(key)) return val;
   }
-  return sheetName;
+  return sheetName.trim();
 }
 
-// 날짜 → YYYY-MM-DD
-// SheetJS cellDates:true → Date 객체, raw:false → 문자열, 숫자(serial) 등 모두 처리
+// 날짜 → YYYY-MM-DD (Date 객체 / Excel serial / 다양한 문자열)
 function parseDate(val) {
   if (!val && val !== 0) return null;
-  // Date 객체 (cellDates:true)
   if (val instanceof Date) {
     if (isNaN(val.getTime())) return null;
-    // UTC 기준으로 slice하면 시차 오류 → 로컬 기준
     const y = val.getFullYear();
     const m = String(val.getMonth() + 1).padStart(2, '0');
     const d = String(val.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
-  // 숫자(Excel serial) — cellDates 미처리 fallback
   if (typeof val === 'number') {
     const d = new Date(Math.round((val - 25569) * 86400 * 1000));
-    const y = d.getUTCFullYear();
-    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const dy = String(d.getUTCDate()).padStart(2, '0');
-    return `${y}-${mo}-${dy}`;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   }
-  // 문자열: "2025-01-02", "2025/01/02", "2025.01.02", "2025-01-02 00:00:00"
   const s = String(val).trim();
-  const m1 = s.match(/(\d{4})[.\-\/](\d{2})[.\-\/](\d{2})/);
-  if (m1) return `${m1[1]}-${m1[2]}-${m1[3]}`;
-  // "1/2/2025" 또는 "1/2/25" (M/D/YY)
+  const m1 = s.match(/(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
+  if (m1) return `${m1[1]}-${m1[2].padStart(2, '0')}-${m1[3].padStart(2, '0')}`;
   const m2 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (m2) {
     const yr = m2[3].length === 2 ? `20${m2[3]}` : m2[3];
-    return `${yr}-${m2[1].padStart(2,'0')}-${m2[2].padStart(2,'0')}`;
+    return `${yr}-${m2[1].padStart(2, '0')}-${m2[2].padStart(2, '0')}`;
   }
   return null;
 }
 
-// 금액 → 정수 (콤마, 공백 제거)
+// 금액 → 정수 (콤마·"원"·공백 등 숫자/부호 외 제거)
 function parseAmount(val) {
   if (val === null || val === undefined || val === '') return 0;
   if (typeof val === 'number') return Math.round(val);
-  return parseInt(String(val).replace(/[,\s]/g, ''), 10) || 0;
+  const cleaned = String(val).replace(/[^0-9-]/g, '');
+  if (cleaned === '' || cleaned === '-') return 0;
+  return parseInt(cleaned, 10) || 0;
 }
 
-// 비용 구분 정규화
+// 비용 구분 정규화 (부분문자열 매칭)
 function mapCategory(raw) {
-  if (!raw) return '';
-  const v = String(raw).trim();
+  const v = String(raw ?? '').trim();
   if (!v) return '';
   if (v.includes('비에스유통')) return '비에스유통';
-  if (v.includes('연인터내셔널') || v.includes('연인터')) return '연인터내셔널';
-  if (v === '내역 삭제') return '내역 삭제';
+  if (v.includes('연인터')) return '연인터내셔널';
+  if (v.includes('내역 삭제') || v.includes('내역삭제')) return '내역 삭제';
   return v;
 }
 
-// 헤더 행 인덱스를 찾고 데이터 추출
-// 첫 번째 행이 헤더라고 가정 (분석 결과 모든 시트 동일)
 function parseSheet(ws, sheetName, company) {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, cellDates: true, defval: '' });
-  if (raw.length < 2) return [];
+  if (raw.length < 2) return { records: [], headerIdx: -1, rawCount: 0 };
 
-  const headers = raw[0].map(h => String(h).trim());
-  const dataRows = raw.slice(1).filter(r => r.some(c => c !== ''));
+  // 헤더 행 자동 탐지: '품명'을 포함하는 첫 행 (없으면 0행)
+  let headerIdx = raw.findIndex(r => r.some(c => norm(c) === '품명'));
+  if (headerIdx === -1) headerIdx = 0;
 
-  const col = name => {
-    const idx = headers.findIndex(h => h === name);
-    return idx;
-  };
+  const headers = raw[headerIdx];
+  const dataRows = raw.slice(headerIdx + 1).filter(r => r.some(c => c !== '' && c !== null && c !== undefined));
+
+  // 정규화 이름으로 컬럼 인덱스 탐지
+  const col = (name) => headers.findIndex(h => norm(h) === norm(name));
+  const findFirst = (cands) => { for (const n of cands) { const i = col(n); if (i !== -1) return i; } return -1; };
 
   const records = [];
 
-  if (company === '광주은행카드') {
-    // 특수 처리: 연도 + 일자 조합, 비용구분은 마지막 열에서 파싱
-    const iYear = col('연도');
-    const iDay  = col('일자');
-    const iMerch = col('거래처');
-    const iProd  = col('품명');
-    const iAmt   = col('합계');
-    const iCat   = col('4월확인해주신 내역');
-
+  // 광주은행: 연도 + 일자 조합, 비용구분은 '...확인...내역' 열에서 파싱
+  if (company === '광주은행카드' && col('연도') !== -1) {
+    const iYear = col('연도'), iDay = col('일자'), iMerch = col('거래처');
+    const iProd = col('품명'), iAmt = col('합계');
+    const iCat = headers.findIndex(h => norm(h).includes('확인') && norm(h).includes('내역'));
     dataRows.forEach((row, idx) => {
       const year = String(row[iYear] ?? '').trim();
-      const day  = String(row[iDay]  ?? '').trim();
-      const date = year && day ? `${year}-${day.replace(/\//g, '-')}` : null;
+      const day = String(row[iDay] ?? '').trim();
       records.push({
-        card_company:     company,
-        transaction_date: date,
-        card_number:      null,
-        merchant_name:    String(row[iMerch] ?? '').trim(),
-        amount:           parseAmount(row[iAmt]),
-        product_name:     String(row[iProd]  ?? '').trim(),
-        cost_category:    mapCategory(row[iCat]),
-        row_hash:         `${sheetName}::${idx}`,
+        card_company: company,
+        transaction_date: year && day ? `${year}-${day.replace(/[.\/]/g, '-')}` : null,
+        card_number: null,
+        merchant_name: String(row[iMerch] ?? '').trim(),
+        amount: parseAmount(row[iAmt]),
+        product_name: String(row[iProd] ?? '').trim(),
+        cost_category: mapCategory(iCat !== -1 ? row[iCat] : ''),
+        row_hash: `${sheetName}::${idx}`,
       });
     });
-    return records;
+    return { records, headerIdx, rawCount: dataRows.length };
   }
 
-  // 일반 처리 — 날짜 컬럼명 후보
-  // ⚠️ 거래일 기준 = '매출일자'(실제 거래일)를 '매입일자'(카드 청구일)보다 우선.
-  //    우리/비씨/기업/부산은행 카드는 두 컬럼 다 있으나, 실제 거래일(매출일자)을 채택.
-  //    → 작년 거래의 환불건은 매출일자가 전년도(2024)로 표시되는 게 정상.
+  // 일반 처리 — 거래일 기준 = '매출일자'(실제 거래일)를 '매입일자'(청구일)보다 우선.
+  //   → 작년 거래의 환불건은 매출일자가 전년도(2024)로 표시되는 게 정상.
   const DATE_COLS  = ['이용일', '매출일자', '매입일자', '거래일', '거래일자', '접수일자'];
-  const AMT_COLS   = ['매출금액', '이용금액', '이용금액(원)', '원화사용금액', '승인금액', '이용 금액'];
-  const MERCH_COLS = ['가맹점명'];
-  const CARD_COLS  = ['카드번호', '이용카드(뒤4자리)'];
+  const AMT_COLS   = ['매출금액', '이용금액', '이용금액(원)', '매출금액(원)', '원화사용금액', '승인금액'];
+  const MERCH_COLS = ['가맹점명', '거래처'];
+  const CARD_COLS  = ['카드번호', '이용카드(뒤4자리)', '이용카드'];
 
-  const findFirst = (candidates) => {
-    for (const name of candidates) {
-      const i = col(name);
-      if (i !== -1) return i;
-    }
-    return -1;
-  };
-
-  const iDate  = findFirst(DATE_COLS);
+  let iDate    = findFirst(DATE_COLS);
+  // 폴백: 헤더가 2행으로 분리된 시트(예: 제주은행 "거래"+"일자")는 날짜 컬럼명을 못 찾음.
+  //       첫 컬럼이 날짜로 파싱되면 첫 컬럼을 거래일로 사용.
+  if (iDate === -1 && dataRows.some(r => parseDate(r[0]))) iDate = 0;
   const iAmt   = findFirst(AMT_COLS);
   const iMerch = findFirst(MERCH_COLS);
   const iCard  = findFirst(CARD_COLS);
   const iProd  = col('품명');
   const iCat   = col('비용 구분');
 
-  // 하나카드는 매출일자(idx 1)가 실제 거래일
-  const effectiveDateIdx = company === '하나카드'
-    ? (col('매출일자') !== -1 ? col('매출일자') : iDate)
-    : iDate;
-
   dataRows.forEach((row, idx) => {
     records.push({
-      card_company:     company,
-      transaction_date: parseDate(row[effectiveDateIdx]),
-      card_number:      iCard !== -1 ? String(row[iCard] ?? '').trim() || null : null,
-      merchant_name:    iMerch !== -1 ? String(row[iMerch] ?? '').trim() : '',
-      amount:           parseAmount(row[iAmt]),
-      product_name:     iProd !== -1 ? String(row[iProd] ?? '').trim() : '',
-      cost_category:    iCat  !== -1 ? mapCategory(row[iCat]) : '',
-      row_hash:         `${sheetName}::${idx}`,
+      card_company: company,
+      transaction_date: iDate !== -1 ? parseDate(row[iDate]) : null,
+      card_number: iCard !== -1 ? (String(row[iCard] ?? '').trim() || null) : null,
+      merchant_name: iMerch !== -1 ? String(row[iMerch] ?? '').trim() : '',
+      amount: iAmt !== -1 ? parseAmount(row[iAmt]) : 0,
+      product_name: iProd !== -1 ? String(row[iProd] ?? '').trim() : '',
+      cost_category: iCat !== -1 ? mapCategory(row[iCat]) : '',
+      row_hash: `${sheetName}::${idx}`,
     });
   });
 
-  return records;
+  return { records, headerIdx, rawCount: dataRows.length };
 }
 
 async function main() {
   console.log(`\n📂 파일 읽기: ${EXCEL_PATH}`);
   const wb = XLSX.readFile(EXCEL_PATH);
-  console.log(`   시트 수: ${wb.SheetNames.length}개\n`);
+  console.log(`   시트 수: ${wb.SheetNames.length}개${REPLACE ? '  [⚠️ --replace: 기존 데이터 전체 삭제]' : ''}\n`);
 
-  let totalParsed = 0;
-  let totalErrors = 0;
   const allRecords = [];
-  const summary = [];
+  const dropped = [];
+  let totalRaw = 0;
 
-  let skippedTotal = 0;
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
     const company = detectCompany(sheetName);
-    const parsed = parseSheet(ws, sheetName, company);
+    const { records: parsed, headerIdx, rawCount } = parseSheet(ws, sheetName, company);
 
-    // 날짜 없는 행(합계행·빈행 등 비데이터 행) 제외 후 카운트
+    // 날짜 없는 행(합계행·연속헤더행·빈행 등 비데이터 행) 제외
     const records = parsed.filter(r => r.transaction_date);
-    const skipped = parsed.length - records.length;
-    skippedTotal += skipped;
+    const skip = parsed.filter(r => !r.transaction_date);
+    dropped.push(...skip);
+    totalRaw += rawCount;
 
-    const expected = EXPECTED_ROWS[company];
-    const match = expected !== undefined
-      ? (records.length === expected ? '✅' : `⚠️ 기대:${expected}`)
-      : '❓';
-
-    const skipNote = skipped > 0 ? `  (합계행 등 ${skipped}건 제외)` : '';
-    console.log(`  ${match}  ${company.padEnd(12)}  ${records.length}건${skipNote}`);
-    summary.push({ company, count: records.length, expected });
-    totalParsed += records.length;
-    if (expected && records.length !== expected) totalErrors++;
+    const skipNote = skip.length > 0 ? `  (비데이터 ${skip.length}건 제외)` : '';
+    const hdrNote = headerIdx > 0 ? `  [헤더 ${headerIdx + 1}행째]` : '';
+    console.log(`  ${company.padEnd(14)}  원본 ${String(rawCount).padStart(4)} → 적재 ${String(records.length).padStart(4)}건${skipNote}${hdrNote}`);
     allRecords.push(...records);
   }
 
-  console.log(`\n   합계: ${totalParsed}건${skippedTotal > 0 ? `  (비데이터 행 ${skippedTotal}건 제외)` : ''}`);
-  if (totalErrors > 0) {
-    console.warn(`⚠️  행 수 불일치 시트: ${totalErrors}개`);
+  console.log(`\n   원본 데이터행 합계: ${totalRaw}건  →  적재 대상: ${allRecords.length}건`);
+  if (dropped.length) {
+    console.log(`   제외된 비데이터행 ${dropped.length}건: ${dropped.map(r => r.row_hash).join(', ')}`);
+  }
+
+  if (DRY) {
+    console.log('\n🧪 --dry: DB에 쓰지 않고 종료 (파싱 검증 전용)\n');
+    return;
+  }
+
+  if (REPLACE) {
+    console.log('\n🗑️  기존 데이터 삭제 중...');
+    const { error } = await supabase.from('card_transactions_tax').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) { console.error('삭제 실패:', error.message); process.exit(1); }
+    console.log('   완료');
   }
 
   console.log('\n📤 Supabase에 업서트 중...');
@@ -235,49 +208,27 @@ async function main() {
   let inserted = 0;
   for (let i = 0; i < allRecords.length; i += BATCH) {
     const batch = allRecords.slice(i, i + BATCH);
-    const { error } = await supabase
-      .from('card_transactions_tax')
-      .upsert(batch, { onConflict: 'row_hash' });
-    if (error) {
-      console.error(`배치 ${i}~${i + batch.length} 오류:`, error.message);
-      process.exit(1);
-    }
+    const { error } = await supabase.from('card_transactions_tax').upsert(batch, { onConflict: 'row_hash' });
+    if (error) { console.error(`배치 ${i} 오류:`, error.message); process.exit(1); }
     inserted += batch.length;
     process.stdout.write(`\r   ${inserted}/${allRecords.length}건`);
   }
   console.log('\n');
 
-  // 검증: DB에서 카드사별 건수 조회
-  console.log('🔍 DB 검증 중...');
-  const { data: dbCounts, error: dbErr } = await supabase
-    .from('card_transactions_tax')
-    .select('card_company')
-    .then(async ({ data, error }) => {
-      if (error) return { data: null, error };
-      // count per company
-      const counts = {};
-      (data ?? []).forEach(r => { counts[r.card_company] = (counts[r.card_company] ?? 0) + 1; });
-      return { data: counts, error: null };
-    });
-
-  if (dbErr) {
-    console.warn('DB 검증 오류:', dbErr.message);
-  } else {
-    let allOk = true;
-    for (const { company, count } of summary) {
-      const dbCount = dbCounts[company] ?? 0;
-      if (dbCount < count) {
-        console.warn(`  ⚠️  ${company}: 파싱 ${count}건 vs DB ${dbCount}건`);
-        allOk = false;
-      }
-    }
-    if (allOk) console.log('  ✅ 모든 시트 행 수 일치');
+  // DB 검증 — 카드사별 건수 (행 조회는 1000행 캡이 있어 카드사별 count 쿼리로 집계)
+  const companies = [...new Set(allRecords.map(r => r.card_company))].sort();
+  console.log('🔍 DB 카드사별 건수:');
+  for (const c of companies) {
+    const { count } = await supabase
+      .from('card_transactions_tax')
+      .select('*', { count: 'exact', head: true })
+      .eq('card_company', c);
+    console.log(`   ${c.padEnd(14)} ${count}건`);
   }
 
   const { count: grandTotal } = await supabase
     .from('card_transactions_tax')
     .select('*', { count: 'exact', head: true });
-
   console.log(`\n✅ 완료! DB 전체 건수: ${grandTotal}건\n`);
 }
 

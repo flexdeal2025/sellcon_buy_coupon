@@ -53,3 +53,10 @@ ALTER TABLE public.cost_category_options    DISABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.card_transactions_tax TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cost_category_options TO anon, authenticated;
+
+-- 필터용 카드사 목록 (행 조회 1000행 캡 회피 — DISTINCT 집계)
+CREATE OR REPLACE FUNCTION public.distinct_card_companies()
+RETURNS TABLE(card_company text) LANGUAGE sql STABLE AS $$
+  SELECT DISTINCT card_company FROM public.card_transactions_tax ORDER BY card_company;
+$$;
+GRANT EXECUTE ON FUNCTION public.distinct_card_companies() TO anon, authenticated;

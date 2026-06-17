@@ -17,11 +17,6 @@ interface CardTransaction {
   cost_category: string;
 }
 
-const COMPANY_LIST = [
-  "국민카드", "농협카드", "롯데카드", "기업카드", "부산은행카드", "우리카드",
-  "비씨카드", "삼성카드", "신한카드", "하나카드", "현대카드", "제주은행카드", "광주은행카드",
-];
-
 const PAGE_SIZE = 50;
 
 export function CardTaxPanel() {
@@ -46,6 +41,9 @@ export function CardTaxPanel() {
   /* ── 비용구분 옵션 ─────────────────────── */
   const [options, setOptions] = useState<string[]>(["연인터내셔널", "비에스유통", "내역 삭제"]);
   const [newOpt, setNewOpt]   = useState("");
+
+  /* ── 카드사 목록 (DB distinct) ─────────── */
+  const [companyList, setCompanyList] = useState<string[]>([]);
 
   /* ── 선택 / 일괄편집 ───────────────────── */
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -80,6 +78,12 @@ export function CardTaxPanel() {
     if (data?.length) setOptions(data.map((r) => r.label));
   }, [sb]);
 
+  /* ── 카드사 목록 fetch ─────────────────── */
+  const fetchCompanies = useCallback(async () => {
+    const { data } = await sb.rpc("distinct_card_companies");
+    if (data?.length) setCompanyList((data as { card_company: string }[]).map((r) => r.card_company));
+  }, [sb]);
+
   /* ── 행 fetch ──────────────────────────── */
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -102,6 +106,7 @@ export function CardTaxPanel() {
   }, [sb, page, applyFilters]);
 
   useEffect(() => { fetchOptions(); }, [fetchOptions]);
+  useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
   // 필터 변경 시 page 초기화
   useEffect(() => { setPage(0); }, [company, dateFrom, dateTo, catFilter, incompleteOnly]);
@@ -204,7 +209,7 @@ export function CardTaxPanel() {
           onChange={(e) => setCompany(e.target.value)}
         >
           <option value="">전체 카드사</option>
-          {COMPANY_LIST.map((c) => (
+          {companyList.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
