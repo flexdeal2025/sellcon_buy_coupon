@@ -20,9 +20,15 @@ import {
   Search,
   Calculator,
   Tag,
+  Download,
+  Clock,
+  ArrowLeftRight,
 } from "lucide-react";
 
 type Granularity = "day" | "month" | "year";
+type DatePreset = "all" | "this_year" | "this_month" | "last_month" | "custom";
+
+interface DateRange { from: string | null; to: string | null }
 
 interface Product {
   channel_product_no: number;
@@ -49,10 +55,76 @@ interface OrderRow {
   quantity: number;
   settle_amount: number | null;
 }
+interface Summary {
+  matched_rev: number;
+  cost: number;
+  profit: number;
+  miss_rev: number;
+  miss_cnt: number;
+  miss_products: number;
+}
+interface PeriodRow {
+  period: string;
+  matched_rev: number;
+  cost: number;
+  profit: number;
+  miss_rev: number;
+  miss_cnt: number;
+}
+interface ProductRow {
+  channel_product_no: number;
+  product_name: string;
+  rev: number;
+  cost: number;
+  profit: number;
+}
+interface CashFlowRow {
+  settle_complete_date: string;
+  settle_amount: number;
+  pay_settle_amount: number;
+  commission_amount: number;
+}
+interface Freshness {
+  maxDate: string;
+  maxSync: string;
+}
 
 const n = (v: unknown) => Number(v ?? 0);
 
-// 특정 날짜에 유효한 단가 찾기 (기간 겹치면 시작일이 가장 늦은 것)
+// ── 날짜 유틸 ──────────────────────────────────────────
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+function presetRange(preset: DatePreset): DateRange {
+  const d = new Date();
+  const yr = d.getFullYear();
+  const mo = d.getMonth();
+  const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
+  switch (preset) {
+    case "this_month":
+      return { from: fmt(new Date(yr, mo, 1)), to: todayStr() };
+    case "last_month":
+      return { from: fmt(new Date(yr, mo - 1, 1)), to: fmt(new Date(yr, mo, 0)) };
+    case "this_year":
+      return { from: `${yr}-01-01`, to: todayStr() };
+    default:
+      return { from: null, to: null };
+  }
+}
+
+// ── CSV 내보내기 ────────────────────────────────────────
+function downloadCSV(rows: string[][], filename: string) {
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// 특정 날짜에 유효한 단가 찾기
 function findCost(list: Cost[] | undefined, date: string): Cost | null {
   if (!list || !date) return null;
   const matches = list.filter(
@@ -62,6 +134,7 @@ function findCost(list: Cost[] | undefined, date: string): Cost | null {
   return matches.sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1))[0];
 }
 
+// ─────────────────────────── PnLPanel ───────────────────────────
 export function PnLPanel() {
   const [view, setView] = useState<"dashboard" | "cost">("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
@@ -69,7 +142,6 @@ export function PnLPanel() {
   const [orderCosts, setOrderCosts] = useState<OrderCost[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 작은 테이블만 로드 (정산 전체는 서버측 RPC가 집계)
   const loadMeta = useCallback(async () => {
     const sb = getSupabaseClient();
     const [{ data: prods }, { data: cs }, { data: ocs }] = await Promise.all([
@@ -83,9 +155,7 @@ export function PnLPanel() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    loadMeta();
-  }, [loadMeta]);
+  useEffect(() => { loadMeta(); }, [loadMeta]);
 
   const costsByProduct = useMemo(() => {
     const m = new Map<number, Cost[]>();
@@ -117,7 +187,6 @@ export function PnLPanel() {
         <SubTab active={view === "dashboard"} onClick={() => setView("dashboard")} icon={TrendingUp} label="손익 대시보드" />
         <SubTab active={view === "cost"} onClick={() => setView("cost")} icon={Tag} label="매입원가 관리" />
       </div>
-
       {view === "dashboard" ? (
         <Dashboard onGoCost={() => setView("cost")} />
       ) : (
@@ -133,16 +202,8 @@ export function PnLPanel() {
 }
 
 function SubTab({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: typeof TrendingUp;
-  label: string;
-}) {
+  active, onClick, icon: Icon, label,
+}: { active: boolean; onClick: () => void; icon: typeof TrendingUp; label: string }) {
   return (
     <button
       onClick={onClick}
@@ -157,102 +218,115 @@ function SubTab({
   );
 }
 
-// ─────────────────────────── 손익 대시보드 (서버측 집계) ───────────────────────────
-interface Summary {
-  matched_rev: number;
-  cost: number;
-  profit: number;
-  miss_rev: number;
-  miss_cnt: number;
-  miss_products: number;
-}
-interface PeriodRow {
-  period: string;
-  matched_rev: number;
-  cost: number;
-  profit: number;
-  miss_rev: number;
-  miss_cnt: number;
-}
-interface ProductRow {
-  channel_product_no: number;
-  product_name: string;
-  rev: number;
-  cost: number;
-  profit: number;
-}
-
+// ─────────────────────────── 손익 대시보드 ───────────────────────────
 function Dashboard({ onGoCost }: { onGoCost: () => void }) {
+  const [preset, setPreset] = useState<DatePreset>("all");
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null });
   const [gran, setGran] = useState<Granularity>("month");
+
   const [summary, setSummary] = useState<Summary | null>(null);
   const [periods, setPeriods] = useState<PeriodRow[]>([]);
   const [productRank, setProductRank] = useState<ProductRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [periodLoading, setPeriodLoading] = useState(false);
+  const [cashFlow, setCashFlow] = useState<CashFlowRow[]>([]);
+  const [freshness, setFreshness] = useState<Freshness | null>(null);
 
-  // 요약·상품순위 1회
+  const [initLoading, setInitLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [cashLoading, setCashLoading] = useState(false);
+
+  // 최신화 시점 — 마운트 1회
   useEffect(() => {
     (async () => {
+      const { data } = await getSupabaseClient()
+        .from("smartstore_settlements")
+        .select("decision_date, synced_at")
+        .order("synced_at", { ascending: false })
+        .limit(1);
+      const row = (data as { decision_date: string; synced_at: string }[] | null)?.[0];
+      if (row) {
+        setFreshness({
+          maxDate: row.decision_date,
+          maxSync: row.synced_at.slice(0, 16).replace("T", " "),
+        });
+      }
+    })();
+  }, []);
+
+  // 요약 + 상품순위 — dateRange 변경 시
+  useEffect(() => {
+    (async () => {
+      setSummaryLoading(true);
       const sb = getSupabaseClient();
+      const params = { date_from: dateRange.from ?? undefined, date_to: dateRange.to ?? undefined };
       const [{ data: sum }, { data: prod }] = await Promise.all([
-        sb.rpc("pnl_summary"),
-        sb.rpc("pnl_by_product", { limit_n: 10 }),
+        sb.rpc("pnl_summary", params),
+        sb.rpc("pnl_by_product", { limit_n: 10, ...params }),
       ]);
       const s = (sum as Record<string, unknown>[] | null)?.[0];
       setSummary(
-        s
-          ? {
-              matched_rev: n(s.matched_rev),
-              cost: n(s.cost),
-              profit: n(s.profit),
-              miss_rev: n(s.miss_rev),
-              miss_cnt: n(s.miss_cnt),
-              miss_products: n(s.miss_products),
-            }
-          : null,
+        s ? {
+          matched_rev: n(s.matched_rev), cost: n(s.cost), profit: n(s.profit),
+          miss_rev: n(s.miss_rev), miss_cnt: n(s.miss_cnt), miss_products: n(s.miss_products),
+        } : null,
       );
       setProductRank(
         ((prod as Record<string, unknown>[] | null) ?? []).map((p) => ({
           channel_product_no: n(p.channel_product_no),
           product_name: String(p.product_name ?? ""),
-          rev: n(p.rev),
-          cost: n(p.cost),
-          profit: n(p.profit),
+          rev: n(p.rev), cost: n(p.cost), profit: n(p.profit),
         })),
       );
-      setLoading(false);
+      setSummaryLoading(false);
+      setInitLoading(false);
     })();
-  }, []);
+  }, [dateRange]);
 
-  // 기간별 — gran 변경 시
+  // 기간별 — gran 또는 dateRange 변경 시
   useEffect(() => {
     (async () => {
       setPeriodLoading(true);
-      const { data } = await getSupabaseClient().rpc("pnl_by_period", { gran });
+      const params = { gran, date_from: dateRange.from ?? undefined, date_to: dateRange.to ?? undefined };
+      const { data } = await getSupabaseClient().rpc("pnl_by_period", params);
       setPeriods(
         ((data as Record<string, unknown>[] | null) ?? []).map((p) => ({
           period: String(p.period ?? ""),
-          matched_rev: n(p.matched_rev),
-          cost: n(p.cost),
-          profit: n(p.profit),
-          miss_rev: n(p.miss_rev),
-          miss_cnt: n(p.miss_cnt),
+          matched_rev: n(p.matched_rev), cost: n(p.cost), profit: n(p.profit),
+          miss_rev: n(p.miss_rev), miss_cnt: n(p.miss_cnt),
         })),
       );
       setPeriodLoading(false);
     })();
-  }, [gran]);
+  }, [gran, dateRange]);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-16 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin" />
-      </div>
-    );
+  // 현금흐름(정산완료일 기준) — dateRange 변경 시
+  useEffect(() => {
+    (async () => {
+      setCashLoading(true);
+      let q = getSupabaseClient()
+        .from("smartstore_daily_settlement")
+        .select("settle_complete_date,settle_amount,pay_settle_amount,commission_amount")
+        .order("settle_complete_date", { ascending: false })
+        .limit(500);
+      if (dateRange.from) q = q.gte("settle_complete_date", dateRange.from);
+      if (dateRange.to) q = q.lte("settle_complete_date", dateRange.to);
+      const { data } = await q;
+      setCashFlow((data as CashFlowRow[]) ?? []);
+      setCashLoading(false);
+    })();
+  }, [dateRange]);
+
+  function applyPreset(p: DatePreset) {
+    setPreset(p);
+    if (p !== "custom") setDateRange(presetRange(p));
+  }
+
+  if (initLoading) {
+    return <div className="flex justify-center py-16 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
   const hasData = summary && (summary.matched_rev > 0 || summary.miss_cnt > 0);
-  if (!hasData) {
+  if (!hasData && !summaryLoading) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
@@ -262,11 +336,67 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
     );
   }
 
-  const margin = summary.matched_rev > 0 ? (summary.profit / summary.matched_rev) * 100 : 0;
+  const margin = summary && summary.matched_rev > 0 ? (summary.profit / summary.matched_rev) * 100 : 0;
+  const cashTotal = cashFlow.reduce((a, r) => a + r.settle_amount, 0);
+  const cashCommission = cashFlow.reduce((a, r) => a + r.commission_amount, 0);
 
   return (
     <div className="space-y-4">
-      {summary.miss_cnt > 0 && (
+
+      {/* ── 날짜 범위 필터 ── */}
+      <div className="space-y-2 rounded-xl border border-border bg-secondary p-3">
+        <div className="flex flex-wrap gap-1.5">
+          {(["all", "this_year", "this_month", "last_month"] as DatePreset[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => applyPreset(p)}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                preset === p ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {p === "all" ? "전체기간" : p === "this_year" ? "올해" : p === "this_month" ? "이번 달" : "지난달"}
+            </button>
+          ))}
+          <button
+            onClick={() => setPreset("custom")}
+            className={cn(
+              "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              preset === "custom" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:text-foreground",
+            )}
+          >
+            직접 입력
+          </button>
+        </div>
+        {preset === "custom" && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={dateRange.from ?? ""}
+              onChange={(e) => setDateRange((r) => ({ ...r, from: e.target.value || null }))}
+              className="h-8 text-xs"
+            />
+            <span className="text-xs text-muted-foreground">~</span>
+            <Input
+              type="date"
+              value={dateRange.to ?? ""}
+              onChange={(e) => setDateRange((r) => ({ ...r, to: e.target.value || null }))}
+              className="h-8 text-xs"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ── 데이터 최신화 시점 ── */}
+      {freshness && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock className="h-3.5 w-3.5 shrink-0" />
+          <span>데이터 기준 <strong className="text-foreground">{freshness.maxDate}</strong>까지 · 최종 수집 {freshness.maxSync} KST</span>
+        </div>
+      )}
+
+      {/* ── 원가 미입력 경고 ── */}
+      {summary && summary.miss_cnt > 0 && (
         <button
           onClick={onGoCost}
           className="flex w-full items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-left"
@@ -274,45 +404,70 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <div className="text-sm">
             <p className="font-semibold text-warning">매입원가 미입력 {summary.miss_products}개 상품 ({summary.miss_cnt}건)</p>
-            <p className="text-muted-foreground">
-              미입력 매출 {formatKRW(summary.miss_rev)}는 수익 계산에서 제외됨. 탭하여 원가를 입력하세요 →
-            </p>
+            <p className="text-muted-foreground">미입력 매출 {formatKRW(summary.miss_rev)}는 수익 계산에서 제외됨. 탭하여 원가를 입력하세요 →</p>
           </div>
         </button>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        <SummaryCard label="매출 (정산·원가입력분)" value={formatKRW(summary.matched_rev)} icon={Wallet} />
-        <SummaryCard label="매입원가 (비용)" value={formatKRW(summary.cost)} icon={Calculator} />
-        <SummaryCard label="수익" value={formatKRW(summary.profit)} accent={summary.profit >= 0 ? "success" : "destructive"} icon={TrendingUp} />
-        <SummaryCard label="수익률" value={`${margin.toFixed(1)}%`} accent={summary.profit >= 0 ? "success" : "destructive"} icon={TrendingUp} />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        ※ 귀속 기준: 구매확정일 · 매출은 정산금액(수수료 차감 실수령) 기준
-      </p>
+      {/* ── 요약 카드 ── */}
+      {summaryLoading ? (
+        <div className="flex justify-center py-6 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+      ) : summary && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <SummaryCard label="매출 (정산·원가입력분)" value={formatKRW(summary.matched_rev)} icon={Wallet} />
+            <SummaryCard label="매입원가 (비용)" value={formatKRW(summary.cost)} icon={Calculator} />
+            <SummaryCard label="수익" value={formatKRW(summary.profit)} accent={summary.profit >= 0 ? "success" : "destructive"} icon={TrendingUp} />
+            <SummaryCard label="수익률" value={`${margin.toFixed(1)}%`} accent={summary.profit >= 0 ? "success" : "destructive"} icon={TrendingUp} />
+          </div>
+          <p className="text-xs text-muted-foreground">※ 귀속 기준: 구매확정일 · 매출은 정산금액(수수료 차감 실수령) 기준</p>
+        </>
+      )}
 
-      <div className="flex rounded-lg bg-secondary p-1">
-        {(["day", "month", "year"] as Granularity[]).map((g) => (
-          <button
-            key={g}
-            onClick={() => setGran(g)}
-            className={cn(
-              "flex-1 rounded-md py-1.5 text-sm font-medium transition-colors",
-              gran === g ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-            )}
-          >
-            {g === "day" ? "일간" : g === "month" ? "월간" : "연간"}
-          </button>
-        ))}
-      </div>
-
+      {/* ── 기간별 손익 ── */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">기간별 손익</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">기간별 손익</CardTitle>
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-lg bg-secondary p-0.5">
+                {(["day", "month", "year"] as Granularity[]).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setGran(g)}
+                    className={cn(
+                      "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                      gran === g ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+                    )}
+                  >
+                    {g === "day" ? "일간" : g === "month" ? "월간" : "연간"}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  const rows = [
+                    ["기간", "매출", "원가", "수익", "수익률", "원가미입력매출", "원가미입력건수"],
+                    ...periods.map((p) => {
+                      const m = p.matched_rev > 0 ? ((p.profit / p.matched_rev) * 100).toFixed(1) + "%" : "0%";
+                      return [p.period, p.matched_rev, p.cost, p.profit, m, p.miss_rev, p.miss_cnt];
+                    }),
+                  ] as string[][];
+                  downloadCSV(rows, `손익_기간별_${todayStr()}.csv`);
+                }}
+                className="flex items-center gap-1 rounded-lg bg-secondary px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                title="CSV 다운로드"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-2">
           {periodLoading ? (
             <div className="flex justify-center py-4 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : periods.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">해당 기간에 데이터가 없습니다.</p>
           ) : (
             periods.map((p) => {
               const m = p.matched_rev > 0 ? (p.profit / p.matched_rev) * 100 : 0;
@@ -328,9 +483,7 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
                   <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                     <span>매출 {formatKRW(p.matched_rev)}</span>
                     <span>비용 {formatKRW(p.cost)}</span>
-                    {p.miss_cnt > 0 && (
-                      <span className="text-warning">원가미입력 {p.miss_cnt}건 / {formatKRW(p.miss_rev)}</span>
-                    )}
+                    {p.miss_cnt > 0 && <span className="text-warning">원가미입력 {p.miss_cnt}건 / {formatKRW(p.miss_rev)}</span>}
                   </div>
                 </div>
               );
@@ -339,10 +492,29 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
         </CardContent>
       </Card>
 
+      {/* ── 상품별 손익 ── */}
       {productRank.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">상품별 손익 (원가 입력분)</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">상품별 손익 (원가 입력분)</CardTitle>
+              <button
+                onClick={() => {
+                  const rows = [
+                    ["순위", "상품명", "매출", "원가", "수익", "수익률"],
+                    ...productRank.map((p, i) => {
+                      const m = p.rev > 0 ? ((p.profit / p.rev) * 100).toFixed(1) + "%" : "0%";
+                      return [i + 1, p.product_name, p.rev, p.cost, p.profit, m];
+                    }),
+                  ] as string[][];
+                  downloadCSV(rows, `손익_상품별_${todayStr()}.csv`);
+                }}
+                className="flex items-center gap-1 rounded-lg bg-secondary px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                title="CSV 다운로드"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-1.5">
             {productRank.map((p, i) => {
@@ -364,34 +536,82 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
           </CardContent>
         </Card>
       )}
+
+      {/* ── 현금흐름 (정산완료일 기준) ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-1.5 text-base">
+                <ArrowLeftRight className="h-4 w-4" />
+                현금흐름 (정산완료일 기준)
+              </CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">네이버 정산 완료일 기준 실입금액 — 위 P&amp;L(구매확정일 기준)과 귀속 시점이 다를 수 있음</p>
+            </div>
+            {cashFlow.length > 0 && (
+              <button
+                onClick={() => {
+                  const rows = [
+                    ["정산완료일", "정산금액", "수수료"],
+                    ...cashFlow.map((r) => [r.settle_complete_date, r.settle_amount, r.commission_amount]),
+                  ] as string[][];
+                  downloadCSV(rows, `현금흐름_${todayStr()}.csv`);
+                }}
+                className="flex items-center gap-1 rounded-lg bg-secondary px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                title="CSV 다운로드"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {cashLoading ? (
+            <div className="flex justify-center py-4 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : cashFlow.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">해당 기간에 정산 완료 데이터가 없습니다.</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-xs text-muted-foreground">기간 내 실입금 합계</p>
+                  <p className="mt-0.5 text-lg font-bold tabular-nums text-success">{formatKRW(cashTotal)}</p>
+                </div>
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-xs text-muted-foreground">기간 내 수수료 합계</p>
+                  <p className="mt-0.5 text-lg font-bold tabular-nums text-destructive">{formatKRW(cashCommission)}</p>
+                </div>
+              </div>
+              <div className="max-h-60 space-y-1 overflow-y-auto">
+                {cashFlow.map((r) => (
+                  <div key={r.settle_complete_date} className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-sm">
+                    <span className="tabular-nums text-muted-foreground">{r.settle_complete_date}</span>
+                    <div className="text-right">
+                      <span className="font-semibold tabular-nums">{formatKRW(r.settle_amount)}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">수수료 {formatKRW(r.commission_amount)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
     </div>
   );
 }
 
 function SummaryCard({
-  label,
-  value,
-  icon: Icon,
-  accent,
-}: {
-  label: string;
-  value: string;
-  icon: typeof Wallet;
-  accent?: "success" | "destructive";
-}) {
+  label, value, icon: Icon, accent,
+}: { label: string; value: string; icon: typeof Wallet; accent?: "success" | "destructive" }) {
   return (
     <div className="rounded-lg border border-border bg-secondary p-3">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
-      <p
-        className={cn(
-          "mt-1 text-lg font-bold tabular-nums",
-          accent === "success" && "text-success",
-          accent === "destructive" && "text-destructive",
-        )}
-      >
+      <p className={cn("mt-1 text-lg font-bold tabular-nums", accent === "success" && "text-success", accent === "destructive" && "text-destructive")}>
         {value}
       </p>
     </div>
@@ -400,10 +620,7 @@ function SummaryCard({
 
 // ─────────────────────────── 매입원가 관리 ───────────────────────────
 function CostManager({
-  products,
-  costsByProduct,
-  orderCostMap,
-  onChanged,
+  products, costsByProduct, orderCostMap, onChanged,
 }: {
   products: Product[];
   costsByProduct: Map<number, Cost[]>;
@@ -435,7 +652,6 @@ function CostManager({
       <p className="text-xs text-muted-foreground">
         판매중 상품 {products.length}개 · 기간원가 미입력 <span className="font-semibold text-warning">{missingCount}개</span> (상단 정렬)
       </p>
-
       <div className="space-y-2">
         {filtered.map((p) => {
           const list = costsByProduct.get(p.channel_product_no);
@@ -471,14 +687,8 @@ function CostManager({
 }
 
 function CostEditor({
-  channelNo,
-  periods,
-  onChanged,
-}: {
-  channelNo: number;
-  periods: Cost[];
-  onChanged: () => void;
-}) {
+  channelNo, periods, onChanged,
+}: { channelNo: number; periods: Cost[]; onChanged: () => void }) {
   const [unitCost, setUnitCost] = useState("");
   const [from, setFrom] = useState(toDateInput());
   const [to, setTo] = useState("");
@@ -501,9 +711,7 @@ function CostEditor({
     });
     setBusy(false);
     if (error) return toast.error(`저장 실패: ${error.message}`);
-    setUnitCost("");
-    setNote("");
-    setTo("");
+    setUnitCost(""); setNote(""); setTo("");
     toast.success("매입원가 기간이 추가되었습니다.");
     onChanged();
   }
@@ -564,16 +772,9 @@ function CostEditor({
   );
 }
 
-// 주문 건별 매입원가 — 상품 펼칠 때 그 상품 주문만 온디맨드 조회 (별도 결제 상품 등)
 function OrderCostSection({
-  channelNo,
-  orderCostMap,
-  onChanged,
-}: {
-  channelNo: number;
-  orderCostMap: Map<string, OrderCost>;
-  onChanged: () => void;
-}) {
+  channelNo, orderCostMap, onChanged,
+}: { channelNo: number; orderCostMap: Map<string, OrderCost>; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [orders, setOrders] = useState<OrderRow[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -639,14 +840,8 @@ function OrderCostSection({
 }
 
 function OrderCostRow({
-  order,
-  existing,
-  onChanged,
-}: {
-  order: OrderRow;
-  existing: OrderCost | undefined;
-  onChanged: () => void;
-}) {
+  order, existing, onChanged,
+}: { order: OrderRow; existing: OrderCost | undefined; onChanged: () => void }) {
   const [cost, setCost] = useState(existing ? String(existing.cost_amount) : "");
   const [note, setNote] = useState(existing?.note ?? "");
   const [busy, setBusy] = useState(false);
@@ -673,8 +868,7 @@ function OrderCostRow({
     const { error } = await getSupabaseClient().from("order_cost").delete().eq("product_order_id", order.product_order_id);
     setBusy(false);
     if (error) return toast.error(`삭제 실패: ${error.message}`);
-    setCost("");
-    setNote("");
+    setCost(""); setNote("");
     toast.success("삭제되었습니다.");
     onChanged();
   }
