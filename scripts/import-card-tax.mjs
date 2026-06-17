@@ -30,7 +30,7 @@ const EXPECTED_ROWS = {
   '비씨카드': 246,
   '삼성카드': 300,
   '신한카드': 986,
-  '하나카드': 187,
+  '하나카드': 186,
   '현대카드': 1293,
   '제주은행카드': 56,
   '광주은행카드': 22,
@@ -52,18 +52,43 @@ function detectCompany(sheetName) {
 }
 
 // 날짜 → YYYY-MM-DD
+// SheetJS cellDates:true → Date 객체, raw:false → 문자열, 숫자(serial) 등 모두 처리
 function parseDate(val) {
-  if (!val) return null;
+  if (!val && val !== 0) return null;
+  // Date 객체 (cellDates:true)
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    // UTC 기준으로 slice하면 시차 오류 → 로컬 기준
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // 숫자(Excel serial) — cellDates 미처리 fallback
+  if (typeof val === 'number') {
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dy = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${mo}-${dy}`;
+  }
+  // 문자열: "2025-01-02", "2025/01/02", "2025.01.02", "2025-01-02 00:00:00"
   const s = String(val).trim();
-  // "2025-01-02 00:00:00" or "2025-01-02"
   const m1 = s.match(/(\d{4})[.\-\/](\d{2})[.\-\/](\d{2})/);
   if (m1) return `${m1[1]}-${m1[2]}-${m1[3]}`;
+  // "1/2/2025" 또는 "1/2/25" (M/D/YY)
+  const m2 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m2) {
+    const yr = m2[3].length === 2 ? `20${m2[3]}` : m2[3];
+    return `${yr}-${m2[1].padStart(2,'0')}-${m2[2].padStart(2,'0')}`;
+  }
   return null;
 }
 
 // 금액 → 정수 (콤마, 공백 제거)
 function parseAmount(val) {
   if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return Math.round(val);
   return parseInt(String(val).replace(/[,\s]/g, ''), 10) || 0;
 }
 
@@ -81,7 +106,7 @@ function mapCategory(raw) {
 // 헤더 행 인덱스를 찾고 데이터 추출
 // 첫 번째 행이 헤더라고 가정 (분석 결과 모든 시트 동일)
 function parseSheet(ws, sheetName, company) {
-  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, cellDates: true, defval: '' });
   if (raw.length < 2) return [];
 
   const headers = raw[0].map(h => String(h).trim());
@@ -173,34 +198,33 @@ async function main() {
   const allRecords = [];
   const summary = [];
 
+  let skippedTotal = 0;
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
     const company = detectCompany(sheetName);
-    const records = parseSheet(ws, sheetName, company);
+    const parsed = parseSheet(ws, sheetName, company);
+
+    // 날짜 없는 행(합계행·빈행 등 비데이터 행) 제외 후 카운트
+    const records = parsed.filter(r => r.transaction_date);
+    const skipped = parsed.length - records.length;
+    skippedTotal += skipped;
 
     const expected = EXPECTED_ROWS[company];
     const match = expected !== undefined
       ? (records.length === expected ? '✅' : `⚠️ 기대:${expected}`)
       : '❓';
 
-    console.log(`  ${match}  ${company.padEnd(12)}  ${records.length}건`);
+    const skipNote = skipped > 0 ? `  (합계행 등 ${skipped}건 제외)` : '';
+    console.log(`  ${match}  ${company.padEnd(12)}  ${records.length}건${skipNote}`);
     summary.push({ company, count: records.length, expected });
     totalParsed += records.length;
     if (expected && records.length !== expected) totalErrors++;
     allRecords.push(...records);
   }
 
-  console.log(`\n   합계: ${totalParsed}건`);
+  console.log(`\n   합계: ${totalParsed}건${skippedTotal > 0 ? `  (비데이터 행 ${skippedTotal}건 제외)` : ''}`);
   if (totalErrors > 0) {
     console.warn(`⚠️  행 수 불일치 시트: ${totalErrors}개`);
-  }
-
-  // 유효성 체크: date가 null인 행
-  const nullDates = allRecords.filter(r => !r.transaction_date);
-  if (nullDates.length) {
-    console.warn(`\n⚠️  날짜 파싱 실패: ${nullDates.length}건 (row_hash 샘플: ${nullDates.slice(0,3).map(r=>r.row_hash).join(', ')})`);
-    // null date를 임시값으로 채워서 삽입 오류 방지
-    nullDates.forEach(r => { r.transaction_date = '1970-01-01'; });
   }
 
   console.log('\n📤 Supabase에 업서트 중...');
