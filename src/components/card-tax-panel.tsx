@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Download, RefreshCw, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2 } from "lucide-react";
 
 interface CardTransaction {
   id: string;
@@ -16,6 +16,22 @@ interface CardTransaction {
   product_name: string;
   cost_category: string;
 }
+
+interface AutoRule {
+  id: string;
+  match_merchant: string;
+  match_amount: number | null;
+  set_product: string;
+  set_category: string;
+}
+
+interface SupplierMap {
+  id: string;
+  match_merchant: string;
+  supplier: string;
+}
+
+type SortKey = "transaction_date" | "amount" | "card_company";
 
 const PAGE_SIZE = 50;
 
@@ -44,6 +60,17 @@ export function CardTaxPanel() {
 
   /* ── 카드사 목록 (DB distinct) ─────────── */
   const [companyList, setCompanyList] = useState<string[]>([]);
+
+  /* ── 정렬 ──────────────────────────────── */
+  const [sortKey, setSortKey] = useState<SortKey>("transaction_date");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  /* ── 자동 규칙 ─────────────────────────── */
+  const [rules, setRules]   = useState<AutoRule[]>([]);
+  const [applying, setApplying] = useState(false);
+
+  /* ── 가맹점→공급처 매핑 ────────────────── */
+  const [supplierMap, setSupplierMap] = useState<SupplierMap[]>([]);
 
   /* ── 선택 / 일괄편집 ───────────────────── */
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -92,8 +119,8 @@ export function CardTaxPanel() {
       let q = sb
         .from("card_transactions_tax")
         .select("*", { count: "exact" })
-        .order("transaction_date", { ascending: true })
-        .order("card_company",     { ascending: true })
+        .order(sortKey, { ascending: sortAsc })
+        .order("id",    { ascending: true })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       q = applyFilters(q);
       const { data, count, error } = await q;
@@ -103,10 +130,30 @@ export function CardTaxPanel() {
     } finally {
       setLoading(false);
     }
-  }, [sb, page, applyFilters]);
+  }, [sb, page, applyFilters, sortKey, sortAsc]);
+
+  /* ── 규칙 fetch ────────────────────────── */
+  const fetchRules = useCallback(async () => {
+    const { data } = await sb
+      .from("card_auto_rules")
+      .select("*")
+      .order("created_at", { ascending: true });
+    if (data) setRules(data as AutoRule[]);
+  }, [sb]);
+
+  /* ── 가맹점→공급처 매핑 fetch ──────────── */
+  const fetchSupplierMap = useCallback(async () => {
+    const { data } = await sb
+      .from("merchant_supplier_map")
+      .select("*")
+      .order("created_at", { ascending: true });
+    if (data) setSupplierMap(data as SupplierMap[]);
+  }, [sb]);
 
   useEffect(() => { fetchOptions(); }, [fetchOptions]);
   useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
+  useEffect(() => { fetchRules(); }, [fetchRules]);
+  useEffect(() => { fetchSupplierMap(); }, [fetchSupplierMap]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
   // 필터 변경 시 page 초기화
   useEffect(() => { setPage(0); }, [company, dateFrom, dateTo, catFilter, incompleteOnly]);
@@ -183,6 +230,58 @@ export function CardTaxPanel() {
     setNewOpt("");
   };
 
+  /* ── 정렬 토글 ──────────────────────────── */
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortAsc((a) => !a);
+    else { setSortKey(key); setSortAsc(true); }
+    setPage(0);
+  };
+
+  /* ── 규칙 추가/삭제 ─────────────────────── */
+  const addRule = async (rule: Omit<AutoRule, "id">) => {
+    const { data, error } = await sb.from("card_auto_rules").insert(rule).select().single();
+    if (error) { toast.error("규칙 추가 실패: " + error.message); return; }
+    setRules((prev) => [...prev, data as AutoRule]);
+    toast.success("규칙 추가됨");
+  };
+  const removeRule = async (id: string) => {
+    const { error } = await sb.from("card_auto_rules").delete().eq("id", id);
+    if (error) { toast.error("규칙 삭제 실패"); return; }
+    setRules((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  /* ── 규칙 일괄 적용 (빈 칸만) ───────────── */
+  const applyRules = async () => {
+    setApplying(true);
+    try {
+      const { data, error } = await sb.rpc("apply_card_rules", { only_empty: true });
+      if (error) { toast.error("규칙 적용 실패: " + error.message); return; }
+      toast.success(`자동규칙 적용 완료 — ${data ?? 0}건 채움`);
+      await Promise.all([fetchRows(), fetchStats()]);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  /* ── 가맹점→공급처 매핑 추가/삭제 ───────── */
+  const addSupplierMap = async (match_merchant: string, supplier: string) => {
+    const m = match_merchant.trim(), s = supplier.trim();
+    if (!m || !s) { toast.error("가맹점 포함어와 공급처를 모두 입력하세요"); return; }
+    const { data, error } = await sb
+      .from("merchant_supplier_map")
+      .insert({ match_merchant: m, supplier: s })
+      .select()
+      .single();
+    if (error) { toast.error(error.message.includes("duplicate") ? "이미 있는 매핑" : "추가 실패"); return; }
+    setSupplierMap((prev) => [...prev, data as SupplierMap]);
+    toast.success("공급처 매핑 추가됨");
+  };
+  const removeSupplierMap = async (id: string) => {
+    const { error } = await sb.from("merchant_supplier_map").delete().eq("id", id);
+    if (error) { toast.error("삭제 실패"); return; }
+    setSupplierMap((prev) => prev.filter((r) => r.id !== id));
+  };
+
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const allPageSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleAll  = () =>
@@ -249,6 +348,15 @@ export function CardTaxPanel() {
         </label>
 
         <div className="ml-auto flex gap-2">
+          <button
+            onClick={applyRules}
+            disabled={applying || rules.length === 0}
+            title={rules.length === 0 ? "먼저 자동규칙을 추가하세요" : "빈 칸을 규칙대로 자동 채움"}
+            className="flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm hover:bg-primary/10 disabled:opacity-40"
+          >
+            <Wand2 className={cn("h-3.5 w-3.5", applying && "animate-pulse")} />
+            자동규칙 적용
+          </button>
           <button
             onClick={handleExport}
             className="flex items-center gap-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary"
@@ -317,10 +425,22 @@ export function CardTaxPanel() {
               <th className="px-3 py-2 text-left">
                 <input type="checkbox" checked={allPageSel} onChange={toggleAll} />
               </th>
-              <th className="px-3 py-2 text-left text-xs whitespace-nowrap">날짜</th>
-              <th className="px-3 py-2 text-left text-xs whitespace-nowrap">카드사</th>
+              <th className="px-3 py-2 text-left text-xs whitespace-nowrap">
+                <button onClick={() => toggleSort("transaction_date")} className="inline-flex items-center gap-1 hover:text-primary">
+                  날짜 <SortIcon active={sortKey === "transaction_date"} asc={sortAsc} />
+                </button>
+              </th>
+              <th className="px-3 py-2 text-left text-xs whitespace-nowrap">
+                <button onClick={() => toggleSort("card_company")} className="inline-flex items-center gap-1 hover:text-primary">
+                  카드사 <SortIcon active={sortKey === "card_company"} asc={sortAsc} />
+                </button>
+              </th>
               <th className="px-3 py-2 text-left text-xs whitespace-nowrap">가맹점명</th>
-              <th className="px-3 py-2 text-right text-xs whitespace-nowrap">금액</th>
+              <th className="px-3 py-2 text-right text-xs whitespace-nowrap">
+                <button onClick={() => toggleSort("amount")} className="inline-flex items-center gap-1 hover:text-primary">
+                  금액 <SortIcon active={sortKey === "amount"} asc={sortAsc} />
+                </button>
+              </th>
               <th className="px-3 py-2 text-left text-xs whitespace-nowrap">품명</th>
               <th className="px-3 py-2 text-left text-xs whitespace-nowrap">비용구분</th>
             </tr>
@@ -416,6 +536,173 @@ export function CardTaxPanel() {
           </button>
         </div>
       </div>
+
+      {/* 자동 입력 규칙 관리 */}
+      <div className="rounded-xl border border-border p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Wand2 className="h-3.5 w-3.5 text-primary" />
+          <p className="text-xs font-medium">자동 입력 규칙</p>
+          <span className="text-xs text-muted-foreground">
+            가맹점명 포함어(+선택적 금액)가 맞으면 품명·비용구분을 자동으로 채웁니다. ‘자동규칙 적용’은 빈 칸만 채웁니다.
+          </span>
+        </div>
+
+        {/* 규칙 목록 */}
+        {rules.length > 0 && (
+          <div className="mb-2 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-secondary/60 text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1 text-left">가맹점 포함</th>
+                  <th className="px-2 py-1 text-right">금액</th>
+                  <th className="px-2 py-1 text-left">→ 품명</th>
+                  <th className="px-2 py-1 text-left">→ 비용구분</th>
+                  <th className="px-2 py-1"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => (
+                  <tr key={r.id} className="border-t border-border/50">
+                    <td className="px-2 py-1">{r.match_merchant || <span className="text-muted-foreground">(전체)</span>}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.match_amount != null ? r.match_amount.toLocaleString() : <span className="text-muted-foreground">무관</span>}</td>
+                    <td className="px-2 py-1">{r.set_product || "—"}</td>
+                    <td className="px-2 py-1">{r.set_category || "—"}</td>
+                    <td className="px-2 py-1 text-right">
+                      <button onClick={() => removeRule(r.id)} className="text-muted-foreground hover:text-destructive" aria-label="삭제">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <RuleForm options={options} onAdd={addRule} />
+      </div>
+
+      {/* 가맹점 → 공급처 매핑 마스터 */}
+      <div className="rounded-xl border border-border p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <p className="text-xs font-medium">가맹점 → 공급처 매핑</p>
+          <span className="text-xs text-muted-foreground">
+            카드 가맹점명(포함어)을 매입 공급처로 연결. 예: ‘윈큐브마케팅’ → ‘센드비’. 향후 매입 자동등록에 사용됩니다.
+          </span>
+        </div>
+        {supplierMap.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {supplierMap.map((m) => (
+              <span key={m.id} className="flex items-center gap-1.5 rounded-full border border-border bg-secondary px-2.5 py-0.5 text-xs">
+                {m.match_merchant} <span className="text-muted-foreground">→</span> <strong>{m.supplier}</strong>
+                <button onClick={() => removeSupplierMap(m.id)} className="text-muted-foreground hover:text-destructive" aria-label="삭제">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <SupplierMapForm onAdd={addSupplierMap} />
+      </div>
+    </div>
+  );
+}
+
+/* 가맹점→공급처 매핑 추가 폼 */
+function SupplierMapForm({ onAdd }: { onAdd: (merchant: string, supplier: string) => void }) {
+  const [merchant, setMerchant] = useState("");
+  const [supplier, setSupplier] = useState("");
+  const submit = () => { onAdd(merchant, supplier); setMerchant(""); setSupplier(""); };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        className="w-40 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        placeholder="가맹점 포함어 (예: 윈큐브마케팅)"
+        value={merchant}
+        onChange={(e) => setMerchant(e.target.value)}
+      />
+      <span className="text-muted-foreground text-sm">→</span>
+      <input
+        className="w-36 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        placeholder="공급처 (예: 센드비)"
+        value={supplier}
+        onChange={(e) => setSupplier(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+      />
+      <button onClick={submit} className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-secondary">
+        매핑 추가
+      </button>
+    </div>
+  );
+}
+
+/* 정렬 방향 아이콘 */
+function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
+  if (!active) return <ArrowDown className="h-3 w-3 opacity-20" />;
+  return asc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />;
+}
+
+/* 규칙 추가 폼 */
+function RuleForm({
+  options,
+  onAdd,
+}: {
+  options: string[];
+  onAdd: (rule: { match_merchant: string; match_amount: number | null; set_product: string; set_category: string }) => void;
+}) {
+  const [merchant, setMerchant] = useState("");
+  const [amount, setAmount]     = useState("");
+  const [product, setProduct]   = useState("");
+  const [category, setCategory] = useState("");
+
+  const submit = () => {
+    if (!merchant.trim() && !amount.trim()) { toast.error("가맹점 포함어 또는 금액 중 하나는 입력하세요"); return; }
+    if (!product.trim() && !category) { toast.error("품명 또는 비용구분 중 하나는 입력하세요"); return; }
+    onAdd({
+      match_merchant: merchant.trim(),
+      match_amount: amount.trim() ? parseInt(amount.replace(/[^0-9-]/g, ""), 10) : null,
+      set_product: product.trim(),
+      set_category: category,
+    });
+    setMerchant(""); setAmount(""); setProduct(""); setCategory("");
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        className="w-32 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        placeholder="가맹점 포함어 (예: 컬리)"
+        value={merchant}
+        onChange={(e) => setMerchant(e.target.value)}
+      />
+      <input
+        className="w-28 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+        placeholder="금액 (선택)"
+        inputMode="numeric"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+      />
+      <span className="text-muted-foreground text-sm">→</span>
+      <input
+        className="w-40 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        placeholder="품명 (예: 배스킨라빈스 패밀리)"
+        value={product}
+        onChange={(e) => setProduct(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+      />
+      <select
+        className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+      >
+        <option value="">비용구분(선택)</option>
+        {options.map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+      </select>
+      <button onClick={submit} className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground">
+        규칙 추가
+      </button>
     </div>
   );
 }

@@ -229,7 +229,14 @@ async function main() {
   const { count: grandTotal } = await supabase
     .from('card_transactions_tax')
     .select('*', { count: 'exact', head: true });
-  console.log(`\n✅ 완료! DB 전체 건수: ${grandTotal}건\n`);
+  console.log(`\n✅ 완료! DB 전체 건수: ${grandTotal}건`);
+
+  // 자동 입력 규칙 적용 (빈 칸만) — 함수 없으면 조용히 건너뜀
+  const { data: applied, error: ruleErr } = await supabase.rpc('apply_card_rules', { only_empty: true });
+  if (!ruleErr && applied != null) {
+    console.log(`🤖 자동규칙 적용: ${applied}건 채움`);
+  }
+  console.log('');
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
