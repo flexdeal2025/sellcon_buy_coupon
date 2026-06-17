@@ -7,16 +7,18 @@ import { TaxPanel } from "@/components/tax-panel";
 import { PresetsPanel } from "@/components/presets-panel";
 import { SmartstorePanel } from "@/components/smartstore-panel";
 import { PnLPanel } from "@/components/pnl-panel";
-import { Phone, FileSpreadsheet, Star, BarChart2, Wallet } from "lucide-react";
+import { CardTaxPanel } from "@/components/card-tax-panel";
+import { Phone, FileSpreadsheet, Star, BarChart2, Wallet, CreditCard } from "lucide-react";
 
-type Tab = "lines" | "tax" | "presets" | "ai" | "pnl";
+type Tab = "lines" | "tax" | "presets" | "ai" | "pnl" | "cardtax";
 
 const TABS: { key: Tab; label: string; icon: typeof Phone }[] = [
-  { key: "pnl", label: "손익", icon: Wallet },
-  { key: "ai", label: "AI분석", icon: BarChart2 },
-  { key: "lines", label: "회선", icon: Phone },
-  { key: "tax", label: "세무", icon: FileSpreadsheet },
-  { key: "presets", label: "프리셋", icon: Star },
+  { key: "pnl",     label: "손익",    icon: Wallet },
+  { key: "ai",      label: "AI분석",  icon: BarChart2 },
+  { key: "cardtax", label: "카드장부", icon: CreditCard },
+  { key: "lines",   label: "회선",    icon: Phone },
+  { key: "tax",     label: "세무",    icon: FileSpreadsheet },
+  { key: "presets", label: "프리셋",  icon: Star },
 ];
 
 export default function ManagePage() {
@@ -27,13 +29,13 @@ export default function ManagePage() {
       <h1 className="text-xl font-bold">관리</h1>
 
       {/* 탭 */}
-      <div className="flex rounded-xl bg-secondary p-1">
+      <div className="flex rounded-xl bg-secondary p-1 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium transition-colors",
+              "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium transition-colors whitespace-nowrap px-2",
               tab === t.key
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground",
@@ -45,11 +47,12 @@ export default function ManagePage() {
         ))}
       </div>
 
-      {tab === "pnl" && <PnLPanel />}
-      {tab === "lines" && <PhoneLinesPanel />}
-      {tab === "tax" && <TaxPanel />}
+      {tab === "pnl"     && <PnLPanel />}
+      {tab === "lines"   && <PhoneLinesPanel />}
+      {tab === "tax"     && <TaxPanel />}
       {tab === "presets" && <PresetsPanel />}
-      {tab === "ai" && <SmartstorePanel />}
+      {tab === "ai"      && <SmartstorePanel />}
+      {tab === "cardtax" && <CardTaxPanel />}
     </div>
   );
 }
