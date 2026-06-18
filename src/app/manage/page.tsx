@@ -8,17 +8,19 @@ import { PresetsPanel } from "@/components/presets-panel";
 import { SmartstorePanel } from "@/components/smartstore-panel";
 import { PnLPanel } from "@/components/pnl-panel";
 import { CardTaxPanel } from "@/components/card-tax-panel";
-import { Phone, FileSpreadsheet, Star, BarChart2, Wallet, CreditCard } from "lucide-react";
+import { PurchaseReconcilePanel } from "@/components/purchase-reconcile-panel";
+import { Phone, FileSpreadsheet, Star, BarChart2, Wallet, CreditCard, PackageSearch } from "lucide-react";
 
-type Tab = "lines" | "tax" | "presets" | "ai" | "pnl" | "cardtax";
+type Tab = "lines" | "tax" | "presets" | "ai" | "pnl" | "cardtax" | "reconcile";
 
 const TABS: { key: Tab; label: string; icon: typeof Phone }[] = [
-  { key: "pnl",     label: "손익",    icon: Wallet },
-  { key: "ai",      label: "AI분석",  icon: BarChart2 },
-  { key: "cardtax", label: "카드장부", icon: CreditCard },
-  { key: "lines",   label: "회선",    icon: Phone },
-  { key: "tax",     label: "세무",    icon: FileSpreadsheet },
-  { key: "presets", label: "프리셋",  icon: Star },
+  { key: "pnl",       label: "손익",     icon: Wallet },
+  { key: "ai",        label: "AI분석",   icon: BarChart2 },
+  { key: "cardtax",   label: "카드장부",  icon: CreditCard },
+  { key: "reconcile", label: "매입대조",  icon: PackageSearch },
+  { key: "lines",     label: "회선",     icon: Phone },
+  { key: "tax",       label: "세무",     icon: FileSpreadsheet },
+  { key: "presets",   label: "프리셋",   icon: Star },
 ];
 
 export default function ManagePage() {
@@ -52,7 +54,8 @@ export default function ManagePage() {
       {tab === "tax"     && <TaxPanel />}
       {tab === "presets" && <PresetsPanel />}
       {tab === "ai"      && <SmartstorePanel />}
-      {tab === "cardtax" && <CardTaxPanel />}
+      {tab === "cardtax"   && <CardTaxPanel />}
+      {tab === "reconcile" && <PurchaseReconcilePanel />}
     </div>
   );
 }
