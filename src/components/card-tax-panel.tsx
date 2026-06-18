@@ -26,6 +26,8 @@ interface AutoRule {
   id: string;
   match_merchant: string;
   match_amount: number | null;
+  amount_min: number | null;
+  amount_max: number | null;
   set_product: string;
   set_category: string;
 }
@@ -598,7 +600,7 @@ export function CardTaxPanel() {
           <Wand2 className="h-3.5 w-3.5 text-primary" />
           <p className="text-xs font-medium">자동 입력 규칙</p>
           <span className="text-xs text-muted-foreground">
-            가맹점명 포함어(+선택적 금액)가 맞으면 품명·비용구분을 자동으로 채웁니다. ‘자동규칙 적용’은 빈 칸만 채웁니다.
+            가맹점명 포함어 + 금액 조건(정확/이상/이하)이 맞으면 품명·비용구분을 자동으로 채웁니다. ‘자동규칙 적용’은 빈 칸만 채웁니다.
           </span>
         </div>
 
@@ -609,7 +611,7 @@ export function CardTaxPanel() {
               <thead className="bg-secondary/60 text-muted-foreground">
                 <tr>
                   <th className="px-2 py-1 text-left">가맹점 포함</th>
-                  <th className="px-2 py-1 text-right">금액</th>
+                  <th className="px-2 py-1 text-right">금액 조건</th>
                   <th className="px-2 py-1 text-left">→ 품명</th>
                   <th className="px-2 py-1 text-left">→ 비용구분</th>
                   <th className="px-2 py-1"></th>
@@ -619,7 +621,7 @@ export function CardTaxPanel() {
                 {rules.map((r) => (
                   <tr key={r.id} className="border-t border-border/50">
                     <td className="px-2 py-1">{r.match_merchant || <span className="text-muted-foreground">(전체)</span>}</td>
-                    <td className="px-2 py-1 text-right tabular-nums">{r.match_amount != null ? r.match_amount.toLocaleString() : <span className="text-muted-foreground">무관</span>}</td>
+                    <td className="px-2 py-1 text-right tabular-nums whitespace-nowrap">{amountCond(r)}</td>
                     <td className="px-2 py-1">{r.set_product || "—"}</td>
                     <td className="px-2 py-1">{r.set_category || "—"}</td>
                     <td className="px-2 py-1 text-right">
@@ -697,29 +699,46 @@ function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
   return asc ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />;
 }
 
+/* 규칙 금액 조건 표시: 정확/이상/이하/범위 */
+function amountCond(r: AutoRule) {
+  const f = (n: number) => n.toLocaleString();
+  if (r.match_amount != null) return `=${f(r.match_amount)}`;
+  if (r.amount_min != null && r.amount_max != null) return `${f(r.amount_min)}~${f(r.amount_max)}`;
+  if (r.amount_min != null) return `≥${f(r.amount_min)}`;
+  if (r.amount_max != null) return `≤${f(r.amount_max)}`;
+  return <span className="text-muted-foreground">무관</span>;
+}
+
 /* 규칙 추가 폼 */
 function RuleForm({
   options,
   onAdd,
 }: {
   options: string[];
-  onAdd: (rule: { match_merchant: string; match_amount: number | null; set_product: string; set_category: string }) => void;
+  onAdd: (rule: { match_merchant: string; match_amount: number | null; amount_min: number | null; amount_max: number | null; set_product: string; set_category: string }) => void;
 }) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount]     = useState("");
+  const [amtMin, setAmtMin]     = useState("");
+  const [amtMax, setAmtMax]     = useState("");
   const [product, setProduct]   = useState("");
   const [category, setCategory] = useState("");
 
+  const toInt = (s: string) => s.trim() ? (parseInt(s.replace(/[^0-9-]/g, ""), 10) || null) : null;
+
   const submit = () => {
-    if (!merchant.trim() && !amount.trim()) { toast.error("가맹점 포함어 또는 금액 중 하나는 입력하세요"); return; }
+    const hasAmt = amount.trim() || amtMin.trim() || amtMax.trim();
+    if (!merchant.trim() && !hasAmt) { toast.error("가맹점 포함어 또는 금액 조건 중 하나는 입력하세요"); return; }
     if (!product.trim() && !category) { toast.error("품명 또는 비용구분 중 하나는 입력하세요"); return; }
     onAdd({
       match_merchant: merchant.trim(),
-      match_amount: amount.trim() ? parseInt(amount.replace(/[^0-9-]/g, ""), 10) : null,
+      match_amount: toInt(amount),
+      amount_min: toInt(amtMin),
+      amount_max: toInt(amtMax),
       set_product: product.trim(),
       set_category: category,
     });
-    setMerchant(""); setAmount(""); setProduct(""); setCategory("");
+    setMerchant(""); setAmount(""); setAmtMin(""); setAmtMax(""); setProduct(""); setCategory("");
   };
 
   return (
@@ -731,11 +750,25 @@ function RuleForm({
         onChange={(e) => setMerchant(e.target.value)}
       />
       <input
-        className="w-28 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
-        placeholder="금액 (선택)"
+        className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+        placeholder="금액 정확"
         inputMode="numeric"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
+      />
+      <input
+        className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+        placeholder="≥ 이상"
+        inputMode="numeric"
+        value={amtMin}
+        onChange={(e) => setAmtMin(e.target.value)}
+      />
+      <input
+        className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+        placeholder="≤ 이하"
+        inputMode="numeric"
+        value={amtMax}
+        onChange={(e) => setAmtMax(e.target.value)}
       />
       <span className="text-muted-foreground text-sm">→</span>
       <input

@@ -1,22 +1,11 @@
--- 카드내역 자동 입력 규칙 (반복 결제건 품명/비용구분 자동 채우기)
--- Supabase SQL Editor에서 실행
+-- 자동입력 규칙에 금액 범위 조건 추가 (이상 ≥ / 이하 ≤)
+-- schema_card_rules.sql 실행 후 추가 실행. Supabase SQL Editor에서 실행.
 
-CREATE TABLE IF NOT EXISTS public.card_auto_rules (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  match_merchant text    NOT NULL DEFAULT '',  -- 가맹점명 부분일치 (빈값 = 모든 가맹점)
-  match_amount   integer,                       -- 정확 금액 (NULL = 금액 무관)
-  amount_min     integer,                       -- 금액 이상(>=) 조건 (NULL = 조건없음)
-  amount_max     integer,                       -- 금액 이하(<=) 조건 (NULL = 조건없음)
-  set_product    text    NOT NULL DEFAULT '',   -- 채울 품명 (빈값이면 품명 미설정)
-  set_category   text    NOT NULL DEFAULT '',   -- 채울 비용구분 (빈값이면 미설정)
-  created_at     timestamptz DEFAULT now()
-);
+ALTER TABLE public.card_auto_rules
+  ADD COLUMN IF NOT EXISTS amount_min integer,   -- 이 금액 이상(>=)일 때 매칭 (NULL=조건없음)
+  ADD COLUMN IF NOT EXISTS amount_max integer;   -- 이 금액 이하(<=)일 때 매칭 (NULL=조건없음)
 
-ALTER TABLE public.card_auto_rules DISABLE ROW LEVEL SECURITY;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.card_auto_rules TO anon, authenticated;
-
--- 규칙 일괄 적용. only_empty=true면 빈 칸만 채움(기존 입력 보존).
--- 반환값: 적용된 셀(품명·비용구분) 건수.
+-- 규칙 적용 RPC 교체: 가맹점 + (정확금액 | 금액범위) 모두 AND 조건
 CREATE OR REPLACE FUNCTION public.apply_card_rules(only_empty boolean DEFAULT true)
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
