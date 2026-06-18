@@ -15,7 +15,12 @@ interface CardTransaction {
   amount: number;
   product_name: string;
   cost_category: string;
+  owner: string;
+  year: string;
+  month: string;
 }
+
+const MONTHS = ["01","02","03","04","05","06","07","08","09","10","11","12"];
 
 interface AutoRule {
   id: string;
@@ -40,6 +45,9 @@ export function CardTaxPanel() {
 
   /* ── 필터 ─────────────────────────────── */
   const [company, setCompany]           = useState("");
+  const [owner, setOwner]               = useState("");
+  const [year, setYear]                 = useState("");
+  const [month, setMonth]               = useState("");
   const [dateFrom, setDateFrom]         = useState("");
   const [dateTo, setDateTo]             = useState("");
   const [catFilter, setCatFilter]       = useState("");
@@ -58,8 +66,10 @@ export function CardTaxPanel() {
   const [options, setOptions] = useState<string[]>(["연인터내셔널", "비에스유통", "내역 삭제"]);
   const [newOpt, setNewOpt]   = useState("");
 
-  /* ── 카드사 목록 (DB distinct) ─────────── */
+  /* ── 카드사/명의자/연도 목록 (DB distinct) ─ */
   const [companyList, setCompanyList] = useState<string[]>([]);
+  const [ownerList, setOwnerList]     = useState<string[]>([]);
+  const [yearList, setYearList]       = useState<string[]>([]);
 
   /* ── 정렬 ──────────────────────────────── */
   const [sortKey, setSortKey] = useState<SortKey>("transaction_date");
@@ -83,12 +93,15 @@ export function CardTaxPanel() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const applyFilters = useCallback((q: any) => {
     if (company)        q = q.eq("card_company", company);
+    if (owner)          q = q.eq("owner", owner);
+    if (year)           q = q.eq("year", year);
+    if (month)          q = q.eq("month", month);
     if (dateFrom)       q = q.gte("transaction_date", dateFrom);
     if (dateTo)         q = q.lte("transaction_date", dateTo);
     if (catFilter)      q = q.eq("cost_category", catFilter);
     if (incompleteOnly) q = q.eq("cost_category", "");
     return q;
-  }, [company, dateFrom, dateTo, catFilter, incompleteOnly]);
+  }, [company, owner, year, month, dateFrom, dateTo, catFilter, incompleteOnly]);
 
   /* ── 통계 fetch ────────────────────────── */
   const fetchStats = useCallback(async () => {
@@ -107,8 +120,14 @@ export function CardTaxPanel() {
 
   /* ── 카드사 목록 fetch ─────────────────── */
   const fetchCompanies = useCallback(async () => {
-    const { data } = await sb.rpc("distinct_card_companies");
-    if (data?.length) setCompanyList((data as { card_company: string }[]).map((r) => r.card_company));
+    const [{ data: co }, { data: ow }, { data: yr }] = await Promise.all([
+      sb.rpc("distinct_card_companies"),
+      sb.rpc("distinct_card_owners"),
+      sb.rpc("distinct_card_years"),
+    ]);
+    if (co?.length) setCompanyList((co as { card_company: string }[]).map((r) => r.card_company));
+    if (ow?.length) setOwnerList((ow as { owner: string }[]).map((r) => r.owner));
+    if (yr?.length) setYearList((yr as { year: string }[]).map((r) => r.year));
   }, [sb]);
 
   /* ── 행 fetch ──────────────────────────── */
@@ -156,7 +175,7 @@ export function CardTaxPanel() {
   useEffect(() => { fetchSupplierMap(); }, [fetchSupplierMap]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
   // 필터 변경 시 page 초기화
-  useEffect(() => { setPage(0); }, [company, dateFrom, dateTo, catFilter, incompleteOnly]);
+  useEffect(() => { setPage(0); }, [company, owner, year, month, dateFrom, dateTo, catFilter, incompleteOnly]);
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   /* ── 단일 필드 저장 ─────────────────────── */
@@ -192,7 +211,7 @@ export function CardTaxPanel() {
     toast.info("데이터 가져오는 중...");
     let q = sb
       .from("card_transactions_tax")
-      .select("transaction_date,card_company,card_number,merchant_name,amount,product_name,cost_category")
+      .select("transaction_date,owner,card_company,card_number,merchant_name,amount,product_name,cost_category")
       .order("transaction_date", { ascending: true })
       .order("card_company",     { ascending: true });
     q = applyFilters(q);
@@ -203,6 +222,7 @@ export function CardTaxPanel() {
     const ws = XLSX.utils.json_to_sheet(
       data.map((r) => ({
         날짜:   r.transaction_date,
+        명의자: r.owner,
         카드사: r.card_company,
         카드번호: r.card_number ?? "",
         가맹점명: r.merchant_name,
@@ -310,6 +330,41 @@ export function CardTaxPanel() {
           <option value="">전체 카드사</option>
           {companyList.map((c) => (
             <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+
+        {ownerList.length > 1 && (
+          <select
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+          >
+            <option value="">전체 명의자</option>
+            {ownerList.map((o) => (
+              <option key={o} value={o}>{o}</option>
+            ))}
+          </select>
+        )}
+
+        <select
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          value={year}
+          onChange={(e) => setYear(e.target.value)}
+        >
+          <option value="">전체 연도</option>
+          {yearList.map((y) => (
+            <option key={y} value={y}>{y}년</option>
+          ))}
+        </select>
+
+        <select
+          className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+        >
+          <option value="">전체 월</option>
+          {MONTHS.map((m) => (
+            <option key={m} value={m}>{m}월</option>
           ))}
         </select>
 

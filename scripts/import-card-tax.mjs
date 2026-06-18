@@ -15,9 +15,11 @@ import XLSX from 'xlsx';
 const argv = process.argv.slice(2);
 const REPLACE = argv.includes('--replace');
 const DRY = argv.includes('--dry');
+const OWNER = (argv.find(a => a.startsWith('--owner=')) || '').split('=')[1] || '유정인';
 const EXCEL_PATH = argv.find(a => !a.startsWith('--'));
 if (!EXCEL_PATH) {
-  console.error('사용법: npm run card-tax "<엑셀파일경로>" [--replace]');
+  console.error('사용법: npm run card-tax "<엑셀파일경로>" [--owner=명의자] [--replace] [--dry]');
+  console.error('  예: npm run card-tax "...김성수....xlsx" --owner=김성수 --replace');
   process.exit(1);
 }
 
@@ -121,6 +123,7 @@ function parseSheet(ws, sheetName, company) {
         amount: parseAmount(row[iAmt]),
         product_name: String(row[iProd] ?? '').trim(),
         cost_category: mapCategory(iCat !== -1 ? row[iCat] : ''),
+        owner: OWNER,
         row_hash: `${sheetName}::${idx}`,
       });
     });
@@ -163,7 +166,7 @@ function parseSheet(ws, sheetName, company) {
 async function main() {
   console.log(`\n📂 파일 읽기: ${EXCEL_PATH}`);
   const wb = XLSX.readFile(EXCEL_PATH);
-  console.log(`   시트 수: ${wb.SheetNames.length}개${REPLACE ? '  [⚠️ --replace: 기존 데이터 전체 삭제]' : ''}\n`);
+  console.log(`   시트 수: ${wb.SheetNames.length}개  ·  명의자: ${OWNER}${REPLACE ? '  [⚠️ --replace: 기존 데이터 전체 삭제]' : ''}\n`);
 
   const allRecords = [];
   const dropped = [];
