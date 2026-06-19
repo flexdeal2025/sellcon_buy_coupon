@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { formatKRW } from "@/lib/utils";
 import { formatSequenceRanges } from "@/lib/rotation";
-import { Package, Phone } from "lucide-react";
+import { Package, Phone, Mail, CreditCard } from "lucide-react";
 import type { PurchaseRecord } from "@/lib/types";
 
 export function PurchaseCard({
@@ -59,9 +59,27 @@ export function PurchaseCard({
         </div>
       )}
 
+      {/* 계정 · 결제수단 */}
+      {(record.account_email || record.evidence_type) && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {record.account_email && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Mail className="h-3 w-3" />
+              {record.account_email}
+            </span>
+          )}
+          {record.evidence_type && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <CreditCard className="h-3 w-3" />
+              {record.evidence_type}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* 사용 회선 뱃지 */}
       {record.allocated_phone_ids?.length > 0 && (
-        <div className="mt-3 flex items-center gap-1.5">
+        <div className="mt-2 flex items-center gap-1.5">
           <Phone className="h-3.5 w-3.5 text-muted-foreground" />
           <Badge variant="line" className="text-xs">
             {formatSequenceRanges(record.allocated_phone_ids)}
