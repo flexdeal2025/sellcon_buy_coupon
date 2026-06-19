@@ -212,6 +212,7 @@ export function PurchaseReconcilePanel() {
             <tr>
               <th className="px-3 py-2 text-left"><input type="checkbox" checked={allSel} onChange={toggleAll} /></th>
               <th className="px-3 py-2 text-left text-xs whitespace-nowrap">거래일</th>
+              <th className="px-3 py-2 text-left text-xs whitespace-nowrap">공급처</th>
               <th className="px-3 py-2 text-left text-xs whitespace-nowrap">상품명</th>
               <th className="px-3 py-2 text-right text-xs whitespace-nowrap">수량</th>
               <th className="px-3 py-2 text-right text-xs whitespace-nowrap">단가</th>
@@ -221,8 +222,8 @@ export function PurchaseReconcilePanel() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} className="py-8 text-center text-muted-foreground text-sm">로딩 중...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-muted-foreground text-sm">명세서 없음 — 적재 스크립트를 먼저 실행하세요</td></tr>}
+            {loading && <tr><td colSpan={9} className="py-8 text-center text-muted-foreground text-sm">로딩 중...</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={9} className="py-8 text-center text-muted-foreground text-sm">명세서 없음 — 적재 스크립트를 먼저 실행하세요</td></tr>}
             {rows.map((r) => (
               <tr key={r.id} className={cn("border-b border-border/50", r.registered ? "bg-green-50/40 dark:bg-green-950/10" : "hover:bg-secondary/40")}>
                 <td className="px-3 py-1.5">
@@ -230,6 +231,7 @@ export function PurchaseReconcilePanel() {
                     onChange={(e) => setSelected((prev) => { const s = new Set(prev); e.target.checked ? s.add(r.id) : s.delete(r.id); return s; })} />
                 </td>
                 <td className="px-3 py-1.5 text-xs text-muted-foreground whitespace-nowrap">{r.order_date}</td>
+                <td className="px-3 py-1.5 text-xs whitespace-nowrap font-medium">{r.supplier}</td>
                 <td className="px-3 py-1.5 text-xs">{r.product_name}</td>
                 <td className="px-3 py-1.5 text-right text-xs tabular-nums">{r.quantity.toLocaleString()}</td>
                 <td className="px-3 py-1.5 text-right text-xs tabular-nums">{r.unit_price.toLocaleString()}</td>

@@ -87,7 +87,9 @@ export function CardTaxPanel() {
   /* ── 선택 / 일괄편집 ───────────────────── */
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMode, setBulkMode] = useState(false);
+  const [bulkField, setBulkField] = useState<"product_name" | "cost_category">("product_name");
   const [bulkVal, setBulkVal]   = useState("");
+  const [bulkCat, setBulkCat]   = useState("");
 
   /* ────────────────────────────────────────
      쿼리 빌더 (필터 적용)
@@ -193,18 +195,20 @@ export function CardTaxPanel() {
     return true;
   };
 
-  /* ── 일괄 품명 저장 ─────────────────────── */
+  /* ── 일괄편집 닫기 ─────────────────────── */
+  const closeBulk = () => { setBulkMode(false); setBulkVal(""); setBulkCat(""); };
+
+  /* ── 일괄 저장 (품명 or 비용구분) ─────── */
   const applyBulk = async () => {
-    const val = bulkVal.trim();
-    if (!val) return;
+    const val = bulkField === "product_name" ? bulkVal.trim() : bulkCat;
+    if (!val) { toast.error(bulkField === "product_name" ? "품명을 입력하세요" : "비용구분을 선택하세요"); return; }
     const ids = [...selected];
-    const { error } = await sb.from("card_transactions_tax").update({ product_name: val }).in("id", ids);
+    const { error } = await sb.from("card_transactions_tax").update({ [bulkField]: val }).in("id", ids);
     if (error) { toast.error("일괄 저장 실패"); return; }
-    setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, product_name: val } : r)));
+    setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, [bulkField]: val } : r)));
     setSelected(new Set());
-    setBulkMode(false);
-    setBulkVal("");
-    toast.success(`${ids.length}건 품명 저장 완료`);
+    closeBulk();
+    toast.success(`${ids.length}건 ${bulkField === "product_name" ? "품명" : "비용구분"} 저장 완료`);
     fetchStats();
   };
 
@@ -435,22 +439,42 @@ export function CardTaxPanel() {
         <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
           <span className="text-sm font-medium">{selected.size}건 선택</span>
           {!bulkMode ? (
-            <button
-              onClick={() => setBulkMode(true)}
-              className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground"
-            >
-              품명 일괄 입력
-            </button>
+            <>
+              <button
+                onClick={() => { setBulkField("product_name"); setBulkMode(true); }}
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+              >
+                품명 일괄 입력
+              </button>
+              <button
+                onClick={() => { setBulkField("cost_category"); setBulkMode(true); }}
+                className="rounded-lg border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm hover:bg-primary/10"
+              >
+                비용구분 일괄 선택
+              </button>
+            </>
           ) : (
             <div className="flex items-center gap-2">
-              <input
-                autoFocus
-                className="w-48 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-                placeholder="품명 입력..."
-                value={bulkVal}
-                onChange={(e) => setBulkVal(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && applyBulk()}
-              />
+              {bulkField === "product_name" ? (
+                <input
+                  autoFocus
+                  className="w-48 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+                  placeholder="품명 입력..."
+                  value={bulkVal}
+                  onChange={(e) => setBulkVal(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && applyBulk()}
+                />
+              ) : (
+                <select
+                  autoFocus
+                  className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+                  value={bulkCat}
+                  onChange={(e) => setBulkCat(e.target.value)}
+                >
+                  <option value="">— 비용구분 선택 —</option>
+                  {options.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              )}
               <button
                 onClick={applyBulk}
                 className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground"
@@ -458,7 +482,7 @@ export function CardTaxPanel() {
                 적용
               </button>
               <button
-                onClick={() => { setBulkMode(false); setBulkVal(""); }}
+                onClick={closeBulk}
                 className="rounded-lg border border-border px-2 py-1.5 text-sm"
               >
                 <X className="h-3.5 w-3.5" />
