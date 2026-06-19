@@ -1,13 +1,16 @@
 import type { PurchaseRecord } from "./types";
 
-/**
- * 특정 매입처의 "직전 매입에서 사용한 가장 높은 회선 번호"를 찾습니다.
- * 기록이 없으면 null.
- */
-export function getLastUsedHighest(
+/** 날짜 내림차순 정렬 비교 함수 */
+function byDateDesc(a: PurchaseRecord, b: PurchaseRecord): number {
+  const d = (b.purchase_date ?? "").localeCompare(a.purchase_date ?? "");
+  return d !== 0 ? d : (b.created_at ?? "").localeCompare(a.created_at ?? "");
+}
+
+/** 직전 매입에서 사용한 회선 번호 전체를 반환합니다. 기록이 없으면 빈 배열. */
+export function getLastUsedLines(
   records: PurchaseRecord[],
   supplier: string,
-): number | null {
+): number[] {
   const prior = records
     .filter(
       (r) =>
@@ -15,15 +18,21 @@ export function getLastUsedHighest(
         Array.isArray(r.allocated_phone_ids) &&
         r.allocated_phone_ids.length > 0,
     )
-    // 최신 매입 우선 (purchase_date → created_at)
-    .sort((a, b) => {
-      const d = (b.purchase_date ?? "").localeCompare(a.purchase_date ?? "");
-      if (d !== 0) return d;
-      return (b.created_at ?? "").localeCompare(a.created_at ?? "");
-    });
+    .sort(byDateDesc);
+  return prior.length === 0 ? [] : prior[0].allocated_phone_ids;
+}
 
-  if (prior.length === 0) return null;
-  return Math.max(...prior[0].allocated_phone_ids);
+/**
+ * 특정 매입처의 "직전 매입에서 사용한 가장 높은 회선 번호"를 찾습니다.
+ * 기록이 없으면 null.
+ * @deprecated getLastUsedLines 로 대체. 하위 호환용으로 유지.
+ */
+export function getLastUsedHighest(
+  records: PurchaseRecord[],
+  supplier: string,
+): number | null {
+  const lines = getLastUsedLines(records, supplier);
+  return lines.length === 0 ? null : Math.max(...lines);
 }
 
 /**

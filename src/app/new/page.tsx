@@ -23,7 +23,7 @@ import { LineSelector } from "@/components/line-selector";
 import { WorkerPicker } from "@/components/worker-picker";
 import { reconcile, type CalcSource } from "@/lib/calc";
 import {
-  getLastUsedHighest,
+  getLastUsedLines,
   recommendRotation,
   requiredLineCount,
   formatSequenceRanges,
@@ -75,12 +75,15 @@ export default function NewPurchasePage() {
     [lines],
   );
 
-  // 순환 추천
+  // 순환 추천: 직전 매입에서 쓴 회선 전체를 제외한 풀에서 추천
   const suggestion = useMemo(() => {
     if (!supplier || needCount <= 0)
       return { sequences: [] as number[], start: null, wrapped: false, enough: true };
-    const lastHighest = getLastUsedHighest(records, supplier);
-    return recommendRotation(activeSeqs, lastHighest, needCount);
+    const lastUsed = getLastUsedLines(records, supplier);
+    const lastHighest = lastUsed.length > 0 ? Math.max(...lastUsed) : null;
+    const lastUsedSet = new Set(lastUsed);
+    const availableSeqs = activeSeqs.filter((s) => !lastUsedSet.has(s));
+    return recommendRotation(availableSeqs, lastHighest, needCount);
   }, [supplier, needCount, records, activeSeqs]);
 
   // ── 양방향 계산기 ──
