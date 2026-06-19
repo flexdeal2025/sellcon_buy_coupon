@@ -228,27 +228,37 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
                 .map((seq) => {
                   const phone = seqPhoneMap.get(seq);
                   const isChecked = (record.checked_phone_ids ?? []).includes(seq);
+                  const handleCheck = async () => {
+                    if (busy) return;
+                    const current = record.checked_phone_ids ?? [];
+                    const next = isChecked
+                      ? current.filter((s) => s !== seq)
+                      : [...current, seq];
+                    setBusy(true);
+                    try {
+                      await onUpdate(record.id, { checked_phone_ids: next });
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "저장 실패");
+                    } finally {
+                      setBusy(false);
+                    }
+                  };
+                  const handleCopy = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    if (!phone) { toast.error("번호 미등록"); return; }
+                    navigator.clipboard.writeText(phone)
+                      .then(() => toast.success(`#${seq} 복사됨`))
+                      .catch(() => toast.error("복사 실패"));
+                  };
                   return (
-                    <button
+                    <div
                       key={seq}
-                      type="button"
-                      disabled={busy}
-                      onClick={async () => {
-                        const current = record.checked_phone_ids ?? [];
-                        const next = isChecked
-                          ? current.filter((s) => s !== seq)
-                          : [...current, seq];
-                        setBusy(true);
-                        try {
-                          await onUpdate(record.id, { checked_phone_ids: next });
-                        } catch (e) {
-                          toast.error(e instanceof Error ? e.message : "저장 실패");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
+                      role="button"
+                      tabIndex={0}
+                      onClick={handleCheck}
+                      onKeyDown={(e) => e.key === "Enter" && handleCheck()}
                       className={cn(
-                        "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors active:scale-[0.99]",
+                        "flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors active:scale-[0.99]",
                         isChecked
                           ? "border-success/40 bg-success/8 text-foreground"
                           : "border-border bg-secondary text-foreground hover:border-primary/30",
@@ -268,7 +278,15 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
                       {isChecked && (
                         <span className="text-xs font-medium text-success">확인</span>
                       )}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={handleCopy}
+                        title="전화번호 복사"
+                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-primary"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   );
                 })}
             </div>
