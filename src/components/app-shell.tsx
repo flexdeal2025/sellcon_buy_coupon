@@ -7,20 +7,63 @@ import {
   LayoutDashboard,
   PlusCircle,
   PackageCheck,
+  Wallet,
   Settings2,
+  Compass,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SupabaseBanner } from "@/components/supabase-banner";
 
-const NAV = [
-  { href: "/", label: "현황", icon: LayoutDashboard },
-  { href: "/new", label: "매입입력", icon: PlusCircle },
-  { href: "/inventory", label: "재고확인", icon: PackageCheck },
-  { href: "/manage", label: "회선/세무", icon: Settings2 },
+type NavChild = { href: string; label: string; icon: typeof LayoutDashboard };
+type NavGroup = {
+  key: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  href: string; // 그룹 진입 시 기본 경로
+  match: string[]; // 이 그룹으로 간주할 경로 prefix 목록
+  children?: NavChild[]; // 별도 경로로 분리된 하위 기능 (서브내비로 표시)
+};
+
+const NAV: NavGroup[] = [
+  {
+    key: "purchase",
+    label: "매입관리",
+    icon: ClipboardList,
+    href: "/",
+    match: ["/", "/new", "/inventory"],
+    children: [
+      { href: "/", label: "현황", icon: LayoutDashboard },
+      { href: "/new", label: "매입입력", icon: PlusCircle },
+      { href: "/inventory", label: "재고확인", icon: PackageCheck },
+    ],
+  },
+  {
+    key: "finance",
+    label: "정산·세무",
+    icon: Wallet,
+    href: "/manage",
+    match: ["/manage"],
+  },
+  {
+    key: "settings",
+    label: "설정",
+    icon: Settings2,
+    href: "/settings",
+    match: ["/settings"],
+  },
+  {
+    key: "vision",
+    label: "사업방향",
+    icon: Compass,
+    href: "/admin/architecture",
+    match: ["/admin"],
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const activeGroup = NAV.find((g) => isGroupActive(pathname, g)) ?? NAV[0];
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col">
@@ -32,12 +75,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
         {/* 데스크톱 네비게이션 */}
         <nav className="hidden gap-1 sm:flex">
-          {NAV.map((item) => {
-            const active = isActive(pathname, item.href);
+          {NAV.map((g) => {
+            const active = g.key === activeGroup.key;
             return (
               <Link
-                key={item.href}
-                href={item.href}
+                key={g.key}
+                href={g.href}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   active
@@ -45,8 +88,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     : "text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
               >
-                <item.icon className="h-4 w-4" />
-                {item.label}
+                <g.icon className="h-4 w-4" />
+                {g.label}
               </Link>
             );
           })}
@@ -55,27 +98,53 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <SupabaseBanner />
 
+      {/* 그룹 하위 서브내비 (별도 경로로 분리된 기능들) */}
+      {activeGroup.children && activeGroup.children.length > 0 && (
+        <div className="sticky top-14 z-20 border-b border-border bg-background/80 px-4 py-2 backdrop-blur">
+          <div className="flex gap-1.5 overflow-x-auto">
+            {activeGroup.children.map((c) => {
+              const active = isChildActive(pathname, c.href);
+              return (
+                <Link
+                  key={c.href}
+                  href={c.href}
+                  className={cn(
+                    "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
+                    active
+                      ? "bg-foreground text-background"
+                      : "bg-secondary text-secondary-foreground hover:bg-accent",
+                  )}
+                >
+                  <c.icon className="h-3.5 w-3.5" />
+                  {c.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 본문 (모바일 하단 탭바 높이만큼 패딩) */}
       <main className="flex-1 px-4 py-4 pb-28 sm:pb-8">{children}</main>
 
       {/* 모바일 하단 탭바 */}
       <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-3xl items-stretch border-t border-border bg-background/95 pb-safe backdrop-blur sm:hidden">
-        {NAV.map((item) => {
-          const active = isActive(pathname, item.href);
+        {NAV.map((g) => {
+          const active = g.key === activeGroup.key;
           return (
             <Link
-              key={item.href}
-              href={item.href}
+              key={g.key}
+              href={g.href}
               className={cn(
                 "flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
-              <item.icon
+              <g.icon
                 className={cn("h-6 w-6", active && "scale-110")}
                 strokeWidth={active ? 2.5 : 2}
               />
-              {item.label}
+              {g.label}
             </Link>
           );
         })}
@@ -86,7 +155,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function isActive(pathname: string, href: string) {
+function isGroupActive(pathname: string, g: NavGroup) {
+  return g.match.some((m) =>
+    m === "/" ? pathname === "/" : pathname === m || pathname.startsWith(m + "/"),
+  );
+}
+
+function isChildActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
-  return pathname.startsWith(href);
+  return pathname === href || pathname.startsWith(href + "/");
 }
