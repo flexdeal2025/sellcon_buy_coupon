@@ -282,9 +282,9 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
                         type="button"
                         onClick={handleCopy}
                         title="전화번호 복사"
-                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-primary"
+                        className="shrink-0 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary active:scale-95"
                       >
-                        <Copy className="h-3.5 w-3.5" />
+                        <Copy className="h-3 w-3" />
                       </button>
                     </div>
                   );
