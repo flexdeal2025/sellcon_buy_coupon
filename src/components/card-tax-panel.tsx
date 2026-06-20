@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2 } from "lucide-react";
+import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2, PencilLine } from "lucide-react";
 
 interface CardTransaction {
   id: string;
@@ -40,7 +40,7 @@ interface SupplierMap {
 
 type SortKey = "transaction_date" | "amount" | "card_company";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [50, 100, 200, 500];
 
 export function CardTaxPanel() {
   const sb = getSupabaseClient();
@@ -59,6 +59,7 @@ export function CardTaxPanel() {
   const [rows, setRows]           = useState<CardTransaction[]>([]);
   const [totalCount, setTotal]    = useState(0);
   const [page, setPage]           = useState(0);
+  const [pageSize, setPageSize]   = useState(50);
   const [loading, setLoading]     = useState(false);
 
   /* ── 통계 ──────────────────────────────── */
@@ -90,6 +91,13 @@ export function CardTaxPanel() {
   const [bulkField, setBulkField] = useState<"product_name" | "cost_category">("product_name");
   const [bulkVal, setBulkVal]   = useState("");
   const [bulkCat, setBulkCat]   = useState("");
+
+  /* ── 필터 결과 전체 일괄수정 ───────────── */
+  const [scopeOpen, setScopeOpen]     = useState(false);
+  const [scopeField, setScopeField]   = useState<"product_name" | "cost_category">("cost_category");
+  const [scopeVal, setScopeVal]       = useState("");
+  const [scopeCat, setScopeCat]       = useState("");
+  const [scopeBusy, setScopeBusy]     = useState(false);
 
   /* ────────────────────────────────────────
      쿼리 빌더 (필터 적용)
@@ -144,7 +152,7 @@ export function CardTaxPanel() {
         .select("*", { count: "exact" })
         .order(sortKey, { ascending: sortAsc })
         .order("id",    { ascending: true })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        .range(page * pageSize, (page + 1) * pageSize - 1);
       q = applyFilters(q);
       const { data, count, error } = await q;
       if (error) throw error;
@@ -153,7 +161,7 @@ export function CardTaxPanel() {
     } finally {
       setLoading(false);
     }
-  }, [sb, page, applyFilters, sortKey, sortAsc]);
+  }, [sb, page, pageSize, applyFilters, sortKey, sortAsc]);
 
   /* ── 규칙 fetch ────────────────────────── */
   const fetchRules = useCallback(async () => {
@@ -178,8 +186,8 @@ export function CardTaxPanel() {
   useEffect(() => { fetchRules(); }, [fetchRules]);
   useEffect(() => { fetchSupplierMap(); }, [fetchSupplierMap]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
-  // 필터 변경 시 page 초기화
-  useEffect(() => { setPage(0); }, [company, owner, year, month, dateFrom, dateTo, catFilter, incompleteOnly]);
+  // 필터/페이지크기 변경 시 page 초기화
+  useEffect(() => { setPage(0); }, [company, owner, year, month, dateFrom, dateTo, catFilter, incompleteOnly, pageSize]);
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   /* ── 단일 필드 저장 ─────────────────────── */
@@ -210,6 +218,29 @@ export function CardTaxPanel() {
     closeBulk();
     toast.success(`${ids.length}건 ${bulkField === "product_name" ? "품명" : "비용구분"} 저장 완료`);
     fetchStats();
+  };
+
+  /* ── 필터 결과 전체 일괄수정 ───────────── */
+  const closeScope = () => { setScopeOpen(false); setScopeVal(""); setScopeCat(""); };
+
+  const applyScope = async () => {
+    const val = scopeField === "product_name" ? scopeVal.trim() : scopeCat;
+    if (!val) { toast.error(scopeField === "product_name" ? "품명을 입력하세요" : "비용구분을 선택하세요"); return; }
+    if (totalCount === 0) { toast.error("대상 내역이 없습니다"); return; }
+    const fieldLabel = scopeField === "product_name" ? "품명" : "비용구분";
+    if (!confirm(`현재 필터에 해당하는 ${totalCount.toLocaleString()}건의 ${fieldLabel}을(를) "${val}"(으)로 모두 변경합니다.\n계속할까요?`)) return;
+    setScopeBusy(true);
+    try {
+      let q = sb.from("card_transactions_tax").update({ [scopeField]: val });
+      q = applyFilters(q);
+      const { error } = await q;
+      if (error) { toast.error("전체 수정 실패: " + error.message); return; }
+      toast.success(`${totalCount.toLocaleString()}건 ${fieldLabel} 일괄 변경 완료`);
+      closeScope();
+      await Promise.all([fetchRows(), fetchStats()]);
+    } finally {
+      setScopeBusy(false);
+    }
   };
 
   /* ── 엑셀 내보내기 ──────────────────────── */
@@ -308,7 +339,7 @@ export function CardTaxPanel() {
     setSupplierMap((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const totalPages = Math.ceil(totalCount / pageSize);
   const allPageSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleAll  = () =>
     allPageSel ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.id)));
@@ -410,6 +441,15 @@ export function CardTaxPanel() {
 
         <div className="ml-auto flex gap-2">
           <button
+            onClick={() => setScopeOpen((v) => !v)}
+            disabled={totalCount === 0}
+            title="현재 필터에 해당하는 전체 내역의 품명/비용구분을 한 번에 변경"
+            className="flex items-center gap-1 rounded-lg border border-amber-400/50 bg-amber-50/60 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-100/60 disabled:opacity-40 dark:bg-amber-950/20 dark:text-amber-400"
+          >
+            <PencilLine className="h-3.5 w-3.5" />
+            필터 전체 수정
+          </button>
+          <button
             onClick={applyRules}
             disabled={applying || rules.length === 0}
             title={rules.length === 0 ? "먼저 자동규칙을 추가하세요" : "빈 칸을 규칙대로 자동 채움"}
@@ -433,6 +473,55 @@ export function CardTaxPanel() {
           </button>
         </div>
       </div>
+
+      {/* 필터 전체 일괄수정 바 */}
+      {scopeOpen && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/50 bg-amber-50/40 px-3 py-2.5 dark:bg-amber-950/15">
+          <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
+            현재 필터 <strong>{totalCount.toLocaleString()}건</strong> 전체를
+          </span>
+          <select
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            value={scopeField}
+            onChange={(e) => setScopeField(e.target.value as "product_name" | "cost_category")}
+          >
+            <option value="cost_category">비용구분</option>
+            <option value="product_name">품명</option>
+          </select>
+          {scopeField === "product_name" ? (
+            <input
+              className="w-44 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+              placeholder="변경할 품명 입력..."
+              value={scopeVal}
+              onChange={(e) => setScopeVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyScope()}
+            />
+          ) : (
+            <select
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+              value={scopeCat}
+              onChange={(e) => setScopeCat(e.target.value)}
+            >
+              <option value="">— 비용구분 선택 —</option>
+              {options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          )}
+          <span className="text-sm text-amber-800 dark:text-amber-300">(으)로 변경</span>
+          <button
+            onClick={applyScope}
+            disabled={scopeBusy}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {scopeBusy ? "변경 중..." : "전체 적용"}
+          </button>
+          <button
+            onClick={closeScope}
+            className="rounded-lg border border-border px-2 py-1.5 text-sm"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* 일괄편집 바 */}
       {selected.size > 0 && (
@@ -561,30 +650,44 @@ export function CardTaxPanel() {
         </table>
       </div>
 
-      {/* 페이지네이션 */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>
-            {(page * PAGE_SIZE + 1).toLocaleString()}–
-            {Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString()} / {totalCount.toLocaleString()}건
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
-              className="rounded-lg border border-border px-2 py-1 disabled:opacity-40"
+      {/* 페이지네이션 + 페이지 크기 */}
+      {totalCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>
+              {(page * pageSize + 1).toLocaleString()}–
+              {Math.min((page + 1) * pageSize, totalCount).toLocaleString()} / {totalCount.toLocaleString()}건
+            </span>
+            <select
+              className="rounded-lg border border-border bg-background px-2 py-1 text-xs"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              title="한 번에 표시할 건수"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <span className="px-2">{page + 1} / {totalPages}</span>
-            <button
-              disabled={page >= totalPages - 1}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded-lg border border-border px-2 py-1 disabled:opacity-40"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n}건씩</option>
+              ))}
+            </select>
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-lg border border-border px-2 py-1 disabled:opacity-40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="px-2">{page + 1} / {totalPages}</span>
+              <button
+                disabled={page >= totalPages - 1}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-lg border border-border px-2 py-1 disabled:opacity-40"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
