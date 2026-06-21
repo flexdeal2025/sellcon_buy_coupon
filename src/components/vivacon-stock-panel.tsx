@@ -236,6 +236,9 @@ export function VivaconStockPanel() {
   };
 
   const approvedCount = rows.filter((r) => r.inspection_status === "approved" && !r.published).length;
+  const pendingCount = rows.filter((r) => r.inspection_status === "pending" && !r.published).length;
+  const publishedCount = rows.filter((r) => r.published).length;
+  const dupCount = rows.filter((r) => r.dup && !r.published).length;
 
   return (
     <div className="space-y-4">
@@ -305,10 +308,22 @@ export function VivaconStockPanel() {
         </p>
       </div>
 
+      {/* 배치 요약 */}
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border bg-secondary/30 px-3 py-2 text-sm">
+          {batch && <span className="text-muted-foreground">배치 <strong className="text-foreground">{batch.batch_no}</strong></span>}
+          <span>전체 <strong>{rows.length}</strong></span>
+          <span className="text-amber-600">미검수 <strong>{pendingCount}</strong></span>
+          <span className="text-primary">승인 <strong>{approvedCount}</strong></span>
+          <span className="text-green-600">발행 <strong>{publishedCount}</strong></span>
+          {dupCount > 0 && <span className="text-red-600">⚠️중복 <strong>{dupCount}</strong></span>}
+        </div>
+      )}
+
       {/* 일괄변경 + 발행 바 */}
       {rows.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
-          <span className="text-sm">검수 {rows.length} · 승인 <strong>{approvedCount}</strong> · 선택 {selected.size}</span>
+          <span className="text-sm">선택 {selected.size}</span>
           {selected.size > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-muted-foreground text-sm">|</span>
