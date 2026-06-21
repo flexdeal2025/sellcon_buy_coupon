@@ -85,6 +85,9 @@ export function CardTaxPanel() {
   /* ── 가맹점→공급처 매핑 ────────────────── */
   const [supplierMap, setSupplierMap] = useState<SupplierMap[]>([]);
 
+  /* ── 비바콘 상품명 자동완성([비바콘] 제거) ─ */
+  const [vivaconProducts, setVivaconProducts] = useState<string[]>([]);
+
   /* ── 선택 / 일괄편집 ───────────────────── */
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMode, setBulkMode] = useState(false);
@@ -181,6 +184,17 @@ export function CardTaxPanel() {
     if (data) setSupplierMap(data as SupplierMap[]);
   }, [sb]);
 
+  /* ── 비바콘 상품명 fetch ([비바콘] 제거) ── */
+  const fetchVivaconProducts = useCallback(async () => {
+    const { data } = await sb.from("smartstore_products").select("name").limit(3000);
+    if (!data) return;
+    const names = Array.from(new Set(
+      data.map((r) => (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim()).filter(Boolean),
+    )).sort();
+    setVivaconProducts(names);
+  }, [sb]);
+
+  useEffect(() => { fetchVivaconProducts(); }, [fetchVivaconProducts]);
   useEffect(() => { fetchOptions(); }, [fetchOptions]);
   useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
   useEffect(() => { fetchRules(); }, [fetchRules]);
@@ -347,6 +361,11 @@ export function CardTaxPanel() {
   /* ── 렌더 ──────────────────────────────── */
   return (
     <div className="space-y-3">
+      {/* 비바콘 상품명 자동완성 목록 */}
+      <datalist id="cardtax-vivacon-products">
+        {vivaconProducts.map((n) => <option key={n} value={n} />)}
+      </datalist>
+
       {/* 통계 */}
       <div className="flex flex-wrap gap-4 text-sm">
         <span>전체 <strong>{stats.total.toLocaleString()}건</strong></span>
@@ -994,6 +1013,7 @@ function CardRow({
       </td>
       <td className="px-2 py-1">
         <input
+          list="cardtax-vivacon-products"
           className={cn(
             "w-full rounded-md border bg-transparent px-2 py-0.5 text-xs outline-none focus:border-primary focus:bg-background",
             saving
