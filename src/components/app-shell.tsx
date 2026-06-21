@@ -13,6 +13,7 @@ import {
   ClipboardList,
   Boxes,
   ScanLine,
+  ReceiptText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SupabaseBanner } from "@/components/supabase-banner";
@@ -62,6 +63,13 @@ const NAV: NavGroup[] = [
     match: ["/stock"],
   },
   {
+    key: "proof",
+    label: "증빙매핑",
+    icon: ReceiptText,
+    href: "/proof",
+    match: ["/proof"],
+  },
+  {
     key: "settings",
     label: "설정",
     icon: Settings2,
@@ -78,7 +86,7 @@ const NAV: NavGroup[] = [
 ];
 
 // 화면 전체 폭을 쓰는 PC 작업용 라우트 (헤더+콘텐츠 함께 넓어짐)
-const WIDE_ROUTES = ["/vivacon", "/stock"];
+const WIDE_ROUTES = ["/vivacon", "/stock", "/proof"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
