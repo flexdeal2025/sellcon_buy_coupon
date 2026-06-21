@@ -11,6 +11,7 @@ import {
   Settings2,
   Compass,
   ClipboardList,
+  Boxes,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SupabaseBanner } from "@/components/supabase-banner";
@@ -46,6 +47,13 @@ const NAV: NavGroup[] = [
     match: ["/manage"],
   },
   {
+    key: "vivacon",
+    label: "쿠폰재고",
+    icon: Boxes,
+    href: "/vivacon",
+    match: ["/vivacon"],
+  },
+  {
     key: "settings",
     label: "설정",
     icon: Settings2,
@@ -61,12 +69,16 @@ const NAV: NavGroup[] = [
   },
 ];
 
+// 화면 전체 폭을 쓰는 PC 작업용 라우트 (헤더+콘텐츠 함께 넓어짐)
+const WIDE_ROUTES = ["/vivacon"];
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const activeGroup = NAV.find((g) => isGroupActive(pathname, g)) ?? NAV[0];
+  const wide = WIDE_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col">
+    <div className={cn("mx-auto flex min-h-screen w-full flex-col", wide ? "max-w-[1800px]" : "max-w-3xl")}>
       {/* 상단 헤더 */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur">
         <Link href="/" className="flex items-center gap-2 font-bold">
