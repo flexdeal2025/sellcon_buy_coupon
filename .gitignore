@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# 내부 분석 문서 (실제 비밀값 포함 — 커밋 금지)
+기술분석서_*.md
+이양전략보고서_*.md
+
 # vercel
 .vercel
 
