@@ -35,6 +35,17 @@ export function VivaconProofPanel() {
   const [pDate, setPDate] = useState("");
   const [amount, setAmount] = useState("");
 
+  // 누락 리포트
+  interface ReportRow { supplier: string; purchase_date: string; total: number; mapped: number; missing: number }
+  const [report, setReport] = useState<ReportRow[]>([]);
+  const [showReport, setShowReport] = useState(false);
+  const loadReport = async () => {
+    const res = await fetch("/api/proof/report");
+    const json = await res.json();
+    if (json.ok) { setReport(json.rows); setShowReport(true); }
+    else toast.error("리포트 실패: " + json.error);
+  };
+
   useEffect(() => {
     (async () => {
       const { data } = await getSupabaseClient().from("purchase_vendors").select("name").order("name");
@@ -128,8 +139,44 @@ export function VivaconProofPanel() {
           <option value="true">연결완료</option>
         </select>
         <span className="text-sm">재고 <strong>{total}</strong> · 증빙연결 <strong className="text-green-600">{mapped}</strong> · 미연결 <strong className="text-amber-600">{total - mapped}</strong></span>
+        <button onClick={loadReport} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">누락 리포트</button>
         <button onClick={() => { fetchProofs(); fetchInventory(); }} className="ml-auto rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>
       </div>
+
+      {/* 누락 리포트 (매입처 × 매입일) */}
+      {showReport && (
+        <div className="rounded-xl border border-border">
+          <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-3 py-2">
+            <span className="text-sm font-medium">증빙 누락 리포트 (매입처 × 매입일)</span>
+            <button onClick={() => setShowReport(false)} className="text-xs text-muted-foreground hover:text-foreground">닫기</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="border-b border-border bg-secondary/30">
+                <tr>
+                  <th className="px-3 py-1.5 text-left">매입처</th>
+                  <th className="px-3 py-1.5 text-left">매입일</th>
+                  <th className="px-3 py-1.5 text-right">전체</th>
+                  <th className="px-3 py-1.5 text-right">연결</th>
+                  <th className="px-3 py-1.5 text-right">미연결</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
+                {report.map((r) => (
+                  <tr key={`${r.supplier}__${r.purchase_date}`} className={cn("border-b border-border/40", r.missing > 0 && "bg-amber-50/40 dark:bg-amber-950/10")}>
+                    <td className="px-3 py-1.5">{r.supplier}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{r.purchase_date}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{r.total}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-green-600">{r.mapped}</td>
+                    <td className={cn("px-3 py-1.5 text-right tabular-nums font-medium", r.missing > 0 ? "text-amber-600" : "text-muted-foreground")}>{r.missing}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* 좌: 증빙 */}
