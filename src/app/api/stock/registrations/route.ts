@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase/server";
+import { getVivaconSupabase } from "@/lib/supabase/vivacon";
 import { getSignedReadUrl, OCR_BUCKET } from "@/lib/gcp/storage";
 
 export const runtime = "nodejs";
@@ -23,10 +24,22 @@ export async function GET(req: Request) {
     const { data, error } = await q;
     if (error) throw new Error(error.message);
 
+    // 중복 쿠폰번호 감지: 이미 vivacon coupon_codes 에 존재하는지
+    const codes = Array.from(new Set((data ?? []).map((r) => r.coupon_code).filter(Boolean)));
+    const dupSet = new Set<string>();
+    if (codes.length) {
+      try {
+        const vc = getVivaconSupabase();
+        const { data: ex } = await vc.from("coupon_codes").select("coupon_code").in("coupon_code", codes);
+        for (const e of ex ?? []) dupSet.add(e.coupon_code);
+      } catch { /* 외주 연결 불가 시 중복검사 생략 */ }
+    }
+
     const rows = await Promise.all(
       (data ?? []).map(async (r) => ({
         ...r,
         image_url: r.image_path ? await getSignedReadUrl(OCR_BUCKET, r.image_path) : "",
+        dup: !!r.coupon_code && dupSet.has(r.coupon_code),
       })),
     );
     return NextResponse.json({ ok: true, rows });

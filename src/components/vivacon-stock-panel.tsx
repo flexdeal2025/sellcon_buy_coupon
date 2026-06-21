@@ -27,6 +27,7 @@ interface Reg {
   stored_as_code: boolean;
   published: boolean;
   product_slug: string;
+  dup?: boolean;
 }
 
 const QUALITY_COLOR: Record<string, string> = {
@@ -351,6 +352,7 @@ export function VivaconStockPanel() {
             <div className="min-w-0 flex-1 space-y-1.5">
               <div className="flex items-center gap-2 text-xs">
                 <span className={cn("font-medium", QUALITY_COLOR[r.extraction_quality])}>OCR {r.ocr_confidence ?? 0}점</span>
+                {r.dup && !r.published && <span className="rounded bg-red-100 px-1 font-medium text-red-600 dark:bg-red-950/40" title="이미 비바콘 재고에 있는 쿠폰번호">⚠️중복</span>}
                 {r.published && <span className="text-green-600 font-medium">✅발행됨</span>}
                 <label className="ml-auto flex items-center gap-1">
                   <input type="checkbox" checked={selected.has(r.id)} disabled={r.published}
