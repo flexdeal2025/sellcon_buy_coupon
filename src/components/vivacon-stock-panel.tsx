@@ -52,6 +52,11 @@ export function VivaconStockPanel() {
   const [pubFilter, setPubFilter] = useState<"unpublished" | "published" | "all">("unpublished");
   const stopRef = useRef(false);
 
+  // 코드 직접 입력(텍스트)
+  const [codesOpen, setCodesOpen] = useState(false);
+  const [codesText, setCodesText] = useState("");
+  const [codesExpiry, setCodesExpiry] = useState("");
+
   // 일괄변경
   const [bulkField, setBulkField] = useState<BulkField>("product_name");
   const [bulkValue, setBulkValue] = useState("");
@@ -166,6 +171,42 @@ export function VivaconStockPanel() {
       setBusy(false);
       setProgress(null);
       stopRef.current = false;
+    }
+  };
+
+  // 코드 텍스트 일괄등록
+  const submitCodes = async () => {
+    const codes = codesText.split(/[\r\n]+/).map((c) => c.trim()).filter(Boolean);
+    if (codes.length === 0) { toast.error("코드를 입력하세요(한 줄에 하나)"); return; }
+    setBusy(true);
+    try {
+      let b = batch;
+      if (!b) {
+        const res = await fetch("/api/stock/batch", {
+          method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ storage_type: "code", default_product_name: defProduct, default_exchange_location: defSupplier, purchase_date: purchaseDate || null }),
+        });
+        const json = await res.json();
+        if (!json.ok) { toast.error("배치 생성 실패: " + json.error); return; }
+        b = { id: json.batch.id, batch_no: json.batch.batch_no };
+        setBatch(b);
+      }
+      const res = await fetch("/api/stock/codes", {
+        method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+        body: JSON.stringify({
+          batch_id: b.id, codes,
+          product_name: defProduct, expiry_date: codesExpiry, supplier: defSupplier, unit_cost: unitCost,
+          product_slug: slugMap[defProduct] ?? "",
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) { toast.error("코드 등록 실패: " + json.error); return; }
+      toast.success(`${json.inserted}건 코드 등록`);
+      setCodesText("");
+      await fetchRows(b.id);
+      loadBatches();
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -338,7 +379,26 @@ export function VivaconStockPanel() {
           {batch && !progress && <span className="text-sm text-muted-foreground">현재 배치 <strong>{batch.batch_no}</strong></span>}
           {batch && !progress && <button onClick={newBatch} className="text-xs text-muted-foreground hover:text-foreground underline">새 배치 시작</button>}
           {batch && !progress && <button onClick={() => fetchRows(batch.id)} className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>}
+          <button onClick={() => setCodesOpen((v) => !v)} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">
+            {codesOpen ? "코드 입력 닫기" : "코드 직접 입력(텍스트)"}
+          </button>
         </div>
+
+        {/* 코드 직접 입력 (이미지 OCR 없이) */}
+        {codesOpen && (
+          <div className="rounded-lg border border-border bg-background p-3 space-y-2">
+            <p className="text-xs text-muted-foreground">위 <strong>기본 상품명·매입처·매입원가</strong>가 공통 적용됩니다. 코드는 한 줄에 하나씩 붙여넣으세요. (채널 C 등 이미 글자로 된 코드용)</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-muted-foreground">유효기간</label>
+              <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={codesExpiry} onChange={(e) => setCodesExpiry(e.target.value)} />
+            </div>
+            <textarea className="h-32 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm font-mono" placeholder={"쿠폰번호1\n쿠폰번호2\n쿠폰번호3"} value={codesText} onChange={(e) => setCodesText(e.target.value)} />
+            <button onClick={submitCodes} disabled={busy} className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
+              {busy ? "등록 중..." : `코드 등록 (${codesText.split(/[\r\n]+/).map((c) => c.trim()).filter(Boolean).length}건)`}
+            </button>
+          </div>
+        )}
+
         <p className="text-xs text-muted-foreground">
           업로드하면 GCP 저장 → Gemini OCR로 쿠폰번호·유효기간 자동 추출 → 아래에서 이미지 보며 검수·수정 후 <strong>승인 → 발행</strong>.
         </p>
