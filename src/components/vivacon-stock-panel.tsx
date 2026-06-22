@@ -48,6 +48,7 @@ export function VivaconStockPanel() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pubFilter, setPubFilter] = useState<"unpublished" | "published" | "all">("unpublished");
   const stopRef = useRef(false);
 
   // 일괄변경
@@ -85,11 +86,16 @@ export function VivaconStockPanel() {
   }, []);
 
   const fetchRows = useCallback(async (batchId: string) => {
-    const res = await fetch(`/api/stock/registrations?batch_id=${batchId}&published=false`);
+    const params = new URLSearchParams({ batch_id: batchId });
+    if (pubFilter !== "all") params.set("published", pubFilter === "published" ? "true" : "false");
+    const res = await fetch(`/api/stock/registrations?${params}`);
     const json = await res.json();
     if (json.ok) setRows(json.rows);
     else toast.error("목록 조회 실패: " + json.error);
-  }, []);
+  }, [pubFilter]);
+
+  // 발행상태 필터 변경 시 현재 배치 재조회
+  useEffect(() => { if (batch) fetchRows(batch.id); }, [pubFilter, batch, fetchRows]);
 
   const onFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -317,6 +323,15 @@ export function VivaconStockPanel() {
           <span className="text-primary">승인 <strong>{approvedCount}</strong></span>
           <span className="text-green-600">발행 <strong>{publishedCount}</strong></span>
           {dupCount > 0 && <span className="text-red-600">⚠️중복 <strong>{dupCount}</strong></span>}
+          {/* 발행상태 보기 토글 */}
+          <div className="ml-auto flex gap-1">
+            {([["unpublished", "검수중"], ["published", "발행완료"], ["all", "전체"]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setPubFilter(k)}
+                className={cn("rounded-md px-2 py-0.5 text-xs", pubFilter === k ? "bg-foreground text-background" : "bg-secondary text-muted-foreground")}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
