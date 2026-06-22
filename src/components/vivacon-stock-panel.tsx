@@ -50,6 +50,7 @@ export function VivaconStockPanel() {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pubFilter, setPubFilter] = useState<"unpublished" | "published" | "all">("unpublished");
+  const [lowFirst, setLowFirst] = useState(false);
   const stopRef = useRef(false);
 
   // 코드 직접 입력(텍스트)
@@ -303,6 +304,9 @@ export function VivaconStockPanel() {
   };
 
   const approvedCount = rows.filter((r) => r.inspection_status === "approved" && !r.published).length;
+  // 검수 우선: 저신뢰(low) 먼저
+  const qRank = (q: string) => (q === "low" ? 0 : q === "medium" ? 1 : q === "high" ? 2 : 3);
+  const displayRows = lowFirst ? [...rows].sort((a, b) => qRank(a.extraction_quality) - qRank(b.extraction_quality)) : rows;
   const pendingCount = rows.filter((r) => r.inspection_status === "pending" && !r.published).length;
   const publishedCount = rows.filter((r) => r.published).length;
   const dupCount = rows.filter((r) => r.dup && !r.published).length;
@@ -413,8 +417,12 @@ export function VivaconStockPanel() {
           <span className="text-primary">승인 <strong>{approvedCount}</strong></span>
           <span className="text-green-600">발행 <strong>{publishedCount}</strong></span>
           {dupCount > 0 && <span className="text-red-600">⚠️중복 <strong>{dupCount}</strong></span>}
+          <label className="ml-auto flex cursor-pointer items-center gap-1 text-xs text-muted-foreground">
+            <input type="checkbox" checked={lowFirst} onChange={(e) => setLowFirst(e.target.checked)} />
+            저신뢰 먼저
+          </label>
           {/* 발행상태 보기 토글 */}
-          <div className="ml-auto flex gap-1">
+          <div className="flex gap-1">
             {([["unpublished", "검수중"], ["published", "발행완료"], ["all", "전체"]] as const).map(([k, label]) => (
               <button key={k} onClick={() => setPubFilter(k)}
                 className={cn("rounded-md px-2 py-0.5 text-xs", pubFilter === k ? "bg-foreground text-background" : "bg-secondary text-muted-foreground")}>
@@ -459,7 +467,7 @@ export function VivaconStockPanel() {
 
       {/* 검수 카드 목록 */}
       <div className="grid gap-3 lg:grid-cols-2">
-        {rows.map((r) => (
+        {displayRows.map((r) => (
           <div key={r.id} className={cn("flex gap-3 rounded-xl border p-3",
             r.published ? "border-green-500/40 bg-green-50/40 dark:bg-green-950/10" :
             r.inspection_status === "approved" ? "border-primary/40 bg-primary/5" : "border-border")}>
