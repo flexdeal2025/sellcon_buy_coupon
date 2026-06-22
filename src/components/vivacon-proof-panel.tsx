@@ -25,6 +25,7 @@ export function VivaconProofPanel() {
   const [vendors, setVendors] = useState<string[]>([]);
   const [supplier, setSupplier] = useState("");
   const [mappedFilter, setMappedFilter] = useState<"" | "true" | "false">("");
+  const [dateFilter, setDateFilter] = useState("");
   const [activeProof, setActiveProof] = useState<string | null>(null);
   const [selectedRegs, setSelectedRegs] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -70,7 +71,7 @@ export function VivaconProofPanel() {
 
   useEffect(() => { fetchProofs(); }, [fetchProofs]);
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
-  useEffect(() => { setSelectedRegs(new Set()); }, [supplier, mappedFilter]);
+  useEffect(() => { setSelectedRegs(new Set()); }, [supplier, mappedFilter, dateFilter]);
 
   const uploadProofs = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -131,8 +132,12 @@ export function VivaconProofPanel() {
     await Promise.all([fetchProofs(), fetchInventory()]);
   };
 
-  const total = inventory.length;
-  const mapped = inventory.filter((r) => r.proof_id).length;
+  // 등록일 날짜 필터 (표시 등록일과 동일하게 클라이언트에서 — TZ 오차 회피)
+  const displayedInventory = dateFilter
+    ? inventory.filter((r) => (r.created_at ?? "").slice(0, 10) === dateFilter)
+    : inventory;
+  const total = displayedInventory.length;
+  const mapped = displayedInventory.filter((r) => r.proof_id).length;
 
   return (
     <div className="space-y-4">
@@ -147,6 +152,10 @@ export function VivaconProofPanel() {
           <option value="false">미연결만</option>
           <option value="true">연결완료</option>
         </select>
+        <div className="flex items-center gap-1">
+          <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" title="등록일 기준" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+          {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-muted-foreground hover:text-foreground">날짜해제</button>}
+        </div>
         <span className="text-sm">재고 <strong>{total}</strong> · 증빙연결 <strong className="text-green-600">{mapped}</strong> · 미연결 <strong className="text-amber-600">{total - mapped}</strong></span>
         <button onClick={loadReport} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">누락 리포트</button>
         <button onClick={() => { fetchProofs(); fetchInventory(); }} className="ml-auto rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>
@@ -258,7 +267,7 @@ export function VivaconProofPanel() {
                 </tr>
               </thead>
               <tbody>
-                {inventory.map((r) => (
+                {displayedInventory.map((r) => (
                   <tr key={r.id} className={cn("border-b border-border/50", r.proof_id ? "bg-green-50/30 dark:bg-green-950/10" : "hover:bg-secondary/30")}>
                     <td className="px-2 py-1.5">
                       <input type="checkbox" checked={selectedRegs.has(r.id)} disabled={!!r.proof_id}
@@ -277,7 +286,7 @@ export function VivaconProofPanel() {
                     </td>
                   </tr>
                 ))}
-                {inventory.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
+                {displayedInventory.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
               </tbody>
             </table>
           </div>
