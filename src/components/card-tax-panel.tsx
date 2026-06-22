@@ -624,6 +624,7 @@ export function CardTaxPanel() {
                   카드사 <SortIcon active={sortKey === "card_company"} asc={sortAsc} />
                 </button>
               </th>
+              <th className="px-3 py-2 text-left text-xs whitespace-nowrap">카드번호</th>
               <th className="px-3 py-2 text-left text-xs whitespace-nowrap">가맹점명</th>
               <th className="px-3 py-2 text-right text-xs whitespace-nowrap">
                 <button onClick={() => toggleSort("amount")} className="inline-flex items-center gap-1 hover:text-primary">
@@ -637,14 +638,14 @@ export function CardTaxPanel() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-muted-foreground text-sm">
+                <td colSpan={8} className="py-8 text-center text-muted-foreground text-sm">
                   로딩 중...
                 </td>
               </tr>
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-muted-foreground text-sm">
+                <td colSpan={8} className="py-8 text-center text-muted-foreground text-sm">
                   데이터 없음 — 임포트 스크립트를 먼저 실행하세요
                 </td>
               </tr>
@@ -998,6 +999,7 @@ function CardRow({
         {row.transaction_date}
       </td>
       <td className="px-3 py-1.5 text-xs whitespace-nowrap">{row.card_company}</td>
+      <td className="px-3 py-1.5 text-xs tabular-nums whitespace-nowrap text-muted-foreground">{row.card_number ?? ""}</td>
       <td
         className="max-w-44 truncate px-3 py-1.5 text-xs"
         title={row.merchant_name}
