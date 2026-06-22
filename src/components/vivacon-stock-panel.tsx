@@ -477,8 +477,9 @@ export function VivaconStockPanel() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={r.image_url} alt="기프티콘" className="h-40 w-32 rounded-lg border border-border object-cover hover:opacity-80" />
             </button>
-            {/* 필드 */}
-            <div className="min-w-0 flex-1 space-y-1.5">
+            {/* 필드 (Enter=저장) */}
+            <div className="min-w-0 flex-1 space-y-1.5"
+              onKeyDown={(e) => { if (e.key === "Enter" && !r.published && e.target instanceof HTMLInputElement) saveRow(r); }}>
               <div className="flex items-center gap-2 text-xs">
                 <span className={cn("font-medium", QUALITY_COLOR[r.extraction_quality])}>OCR {r.ocr_confidence ?? 0}점</span>
                 {r.dup && !r.published && <span className="rounded bg-red-100 px-1 font-medium text-red-600 dark:bg-red-950/40" title="이미 비바콘 재고에 있는 쿠폰번호">⚠️중복</span>}
