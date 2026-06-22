@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { stripVivacon } from "@/hooks/use-vivacon-products";
 import { Upload, Loader2, Save, CheckCircle2, RotateCcw, Send, RefreshCw, StopCircle, Trash2, ZoomIn, ZoomOut, X, Sparkles } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
@@ -83,7 +84,7 @@ export function VivaconStockPanel() {
       // 상품명 후보: 사전 + 스마트스토어 합집합
       const names = new Set<string>(Object.keys(map));
       for (const r of prods ?? []) {
-        const n = (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim();
+        const n = stripVivacon(r.name);
         if (n) names.add(n);
       }
       setSlugMap(map);

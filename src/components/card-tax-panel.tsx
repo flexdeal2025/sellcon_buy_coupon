@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2, PencilLine } from "lucide-react";
@@ -86,7 +87,7 @@ export function CardTaxPanel() {
   const [supplierMap, setSupplierMap] = useState<SupplierMap[]>([]);
 
   /* ── 비바콘 상품명 자동완성([비바콘] 제거) ─ */
-  const [vivaconProducts, setVivaconProducts] = useState<string[]>([]);
+  const vivaconProducts = useVivaconProducts();
 
   /* ── 선택 / 일괄편집 ───────────────────── */
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -184,17 +185,6 @@ export function CardTaxPanel() {
     if (data) setSupplierMap(data as SupplierMap[]);
   }, [sb]);
 
-  /* ── 비바콘 상품명 fetch ([비바콘] 제거) ── */
-  const fetchVivaconProducts = useCallback(async () => {
-    const { data } = await sb.from("smartstore_products").select("name").limit(3000);
-    if (!data) return;
-    const names = Array.from(new Set(
-      data.map((r) => (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim()).filter(Boolean),
-    )).sort();
-    setVivaconProducts(names);
-  }, [sb]);
-
-  useEffect(() => { fetchVivaconProducts(); }, [fetchVivaconProducts]);
   useEffect(() => { fetchOptions(); }, [fetchOptions]);
   useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
   useEffect(() => { fetchRules(); }, [fetchRules]);

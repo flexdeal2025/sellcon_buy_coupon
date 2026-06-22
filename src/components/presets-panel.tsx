@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { usePresets } from "@/hooks/use-presets";
-import { getSupabaseClient } from "@/lib/supabase/client";
+import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,17 +19,7 @@ export function PresetsPanel() {
   } = usePresets();
 
   // 비바콘 스마트스토어 상품명 자동완성 ([비바콘] 접두 제거)
-  const [vivaconProducts, setVivaconProducts] = useState<string[]>([]);
-  useEffect(() => {
-    (async () => {
-      const { data } = await getSupabaseClient().from("smartstore_products").select("name").limit(3000);
-      if (!data) return;
-      const names = Array.from(new Set(
-        data.map((r: { name: string }) => (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim()).filter(Boolean),
-      )).sort();
-      setVivaconProducts(names);
-    })();
-  }, []);
+  const vivaconProducts = useVivaconProducts();
 
   return (
     <div className="space-y-4">
