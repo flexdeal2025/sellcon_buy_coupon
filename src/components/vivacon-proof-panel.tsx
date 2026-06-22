@@ -4,14 +4,14 @@ import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2, Trash2 } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
 
 interface Proof {
   id: string; platform: string; trader_name: string; proof_date: string | null;
-  amount: number | null; memo: string; image_url: string; linked_count: number;
+  amount: number | null; memo: string; image_url: string; linked_count: number; linked_cost: number;
 }
 interface Reg {
   id: string; product_name: string; option_name: string; coupon_code: string;
@@ -115,6 +115,15 @@ export function VivaconProofPanel() {
     }
   };
 
+  const deleteProof = async (id: string) => {
+    if (!confirm("이 증빙을 삭제합니다(이미지·연결 함께 삭제). 계속할까요?")) return;
+    const res = await fetch(`/api/proofs?id=${id}`, { method: "DELETE", headers: AUTH });
+    const json = await res.json();
+    if (!json.ok) { toast.error("삭제 실패: " + json.error); return; }
+    if (activeProof === id) setActiveProof(null);
+    await Promise.all([fetchProofs(), fetchInventory()]);
+  };
+
   const unlink = async (rid: string) => {
     const res = await fetch(`/api/proof/link?registration_id=${rid}`, { method: "DELETE", headers: AUTH });
     const json = await res.json();
@@ -197,19 +206,33 @@ export function VivaconProofPanel() {
             <p className="text-xs text-muted-foreground">증빙(거래내역/채팅 캡쳐)을 올리고, 카드를 클릭해 활성화한 뒤 우측 재고를 선택해 연결하세요. (한 증빙에 여러 재고 = N:1)</p>
           </div>
 
-          {proofs.map((p) => (
-            <button key={p.id} type="button" onClick={() => setActiveProof(p.id)}
-              className={cn("flex w-full gap-3 rounded-xl border p-2 text-left", activeProof === p.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border hover:bg-secondary/30")}>
+          {proofs.map((p) => {
+            const amt = p.amount ?? null;
+            const matched = amt != null && p.linked_count > 0 && amt === p.linked_cost;
+            const mismatch = amt != null && p.linked_count > 0 && amt !== p.linked_cost;
+            return (
+            <div key={p.id} role="button" tabIndex={0} onClick={() => setActiveProof(p.id)}
+              onKeyDown={(e) => e.key === "Enter" && setActiveProof(p.id)}
+              className={cn("flex w-full cursor-pointer gap-3 rounded-xl border p-2 text-left", activeProof === p.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border hover:bg-secondary/30")}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.image_url} alt="증빙" className="h-24 w-20 rounded border border-border object-cover" />
               <div className="min-w-0 flex-1 text-xs">
-                <div className="font-medium">{p.platform} {p.trader_name && `· ${p.trader_name}`}</div>
-                <div className="text-muted-foreground">{p.proof_date ?? "-"} · {p.amount?.toLocaleString() ?? "-"}원</div>
-                <div className="mt-1">연결 <strong className={p.linked_count ? "text-green-600" : "text-muted-foreground"}>{p.linked_count}건</strong></div>
+                <div className="flex items-center gap-1">
+                  <span className="font-medium">{p.platform} {p.trader_name && `· ${p.trader_name}`}</span>
+                  <button onClick={(e) => { e.stopPropagation(); deleteProof(p.id); }} title="증빙 삭제"
+                    className="ml-auto text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+                <div className="text-muted-foreground">{p.proof_date ?? "-"} · 거래금액 {amt?.toLocaleString() ?? "-"}원</div>
+                <div className="mt-1">연결 <strong className={p.linked_count ? "text-green-600" : "text-muted-foreground"}>{p.linked_count}건</strong>
+                  {p.linked_count > 0 && <span className="text-muted-foreground"> · 매핑합계 {p.linked_cost.toLocaleString()}원</span>}
+                  {matched && <span className="ml-1 text-green-600">✅금액일치</span>}
+                  {mismatch && <span className="ml-1 text-amber-600">⚠️금액불일치</span>}
+                </div>
                 {activeProof === p.id && <div className="mt-1 text-primary font-medium">● 활성 (이 증빙에 연결)</div>}
               </div>
-            </button>
-          ))}
+            </div>
+            );
+          })}
           {proofs.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">업로드된 증빙이 없습니다.</p>}
         </div>
 
