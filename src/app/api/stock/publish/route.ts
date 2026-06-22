@@ -41,12 +41,20 @@ export async function POST(req: Request) {
     try {
       // 안전장치 1: 승인된 건만 발행 (UI 우회 직접호출 방어)
       if (r.inspection_status !== "approved") throw new Error("미승인 건은 발행 불가");
+
+      // 안전장치 2(공통): 우리 시스템에 이미 발행된 동일 쿠폰번호면 차단 (이미지형 포함)
+      if (r.coupon_code) {
+        const { data: dupReg } = await sb.from("stock_registrations")
+          .select("id").eq("coupon_code", r.coupon_code).eq("published", true).neq("id", r.id).limit(1);
+        if (dupReg && dupReg.length > 0) throw new Error("이미 발행된 동일 쿠폰번호(중복)");
+      }
+
       let ref = "";
       if (r.stored_as_code) {
         // 코드형 → vivacon coupon_codes
         if (!r.coupon_code) throw new Error("쿠폰번호 없음");
         const vc = getVivaconSupabase();
-        // 안전장치 2: 이미 존재하는 쿠폰번호면 중복 발행 차단
+        // 안전장치 3(코드형): 비바콘 실재고에 이미 있으면 차단
         const { data: existing } = await vc.from("coupon_codes").select("id").eq("coupon_code", r.coupon_code).limit(1);
         if (existing && existing.length > 0) throw new Error("이미 비바콘 재고에 있는 쿠폰번호(중복)");
         const yymmdd = r.expiry_date ? String(r.expiry_date).slice(2, 4) + String(r.expiry_date).slice(5, 7) + String(r.expiry_date).slice(8, 10) : null;
