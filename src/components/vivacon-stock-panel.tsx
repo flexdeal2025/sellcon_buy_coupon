@@ -1,0 +1,460 @@
+"use client";
+
+import { useState, useCallback, useRef, useEffect } from "react";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import { Upload, Loader2, Save, CheckCircle2, RotateCcw, Send, RefreshCw, StopCircle, Trash2, ZoomIn, ZoomOut, X, Sparkles } from "lucide-react";
+
+const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
+const AUTH = { "x-app-passcode": PASSCODE };
+
+interface Reg {
+  id: string;
+  image_path: string;
+  image_url: string;
+  product_name: string;
+  option_name: string;
+  coupon_code: string;
+  expiry_date: string | null;
+  exchange_location: string;
+  supplier: string;
+  purchase_date: string | null;
+  unit_cost: number | null;
+  ocr_confidence: number | null;
+  extraction_quality: string;
+  inspection_status: string;
+  stored_as_code: boolean;
+  published: boolean;
+  product_slug: string;
+  dup?: boolean;
+}
+
+const QUALITY_COLOR: Record<string, string> = {
+  high: "text-green-600", medium: "text-amber-600", low: "text-red-500",
+};
+type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier";
+interface Vendor { name: string; name_en: string }
+
+export function VivaconStockPanel() {
+  const [storageType, setStorageType] = useState<"image" | "code">("code");
+  const [defProduct, setDefProduct] = useState("");
+  const [defSupplier, setDefSupplier] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState("");
+  const [unitCost, setUnitCost] = useState("");
+
+  const [batch, setBatch] = useState<{ id: string; batch_no: string } | null>(null);
+  const [rows, setRows] = useState<Reg[]>([]);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const stopRef = useRef(false);
+
+  // 일괄변경
+  const [bulkField, setBulkField] = useState<BulkField>("product_name");
+  const [bulkValue, setBulkValue] = useState("");
+
+  // 이미지 팝업(라이트박스)
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [scale, setScale] = useState(1);
+
+  // 상품명 자동완성 + 영문명 사전 + 매입처 마스터
+  const [productOptions, setProductOptions] = useState<string[]>([]);
+  const [slugMap, setSlugMap] = useState<Record<string, string>>({});
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  useEffect(() => {
+    const sb = getSupabaseClient();
+    (async () => {
+      const [{ data: prods }, { data: slugs }, { data: vs }] = await Promise.all([
+        sb.from("smartstore_products").select("name").limit(3000),
+        sb.from("vivacon_product_slugs").select("product_name, slug").limit(10000),
+        sb.from("purchase_vendors").select("name, name_en").order("name"),
+      ]);
+      const map: Record<string, string> = {};
+      for (const s of slugs ?? []) map[s.product_name] = s.slug;
+      // 상품명 후보: 사전 + 스마트스토어 합집합
+      const names = new Set<string>(Object.keys(map));
+      for (const r of prods ?? []) {
+        const n = (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim();
+        if (n) names.add(n);
+      }
+      setSlugMap(map);
+      setProductOptions(Array.from(names).sort());
+      setVendors((vs as Vendor[]) ?? []);
+    })();
+  }, []);
+
+  const fetchRows = useCallback(async (batchId: string) => {
+    const res = await fetch(`/api/stock/registrations?batch_id=${batchId}&published=false`);
+    const json = await res.json();
+    if (json.ok) setRows(json.rows);
+    else toast.error("목록 조회 실패: " + json.error);
+  }, []);
+
+  const onFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const arr = Array.from(files); // await 전에 즉시 스냅샷
+    stopRef.current = false;
+    setBusy(true);
+    try {
+      let b = batch;
+      if (!b) {
+        const res = await fetch("/api/stock/batch", {
+          method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ storage_type: storageType, default_product_name: defProduct, default_exchange_location: defSupplier, purchase_date: purchaseDate || null }),
+        });
+        const json = await res.json();
+        if (!json.ok) { toast.error("배치 생성 실패: " + json.error); return; }
+        b = { id: json.batch.id, batch_no: json.batch.batch_no };
+        setBatch(b);
+      }
+      setProgress({ done: 0, total: arr.length });
+      let done = 0;
+      for (let i = 0; i < arr.length; i++) {
+        if (stopRef.current) break;
+        const fd = new FormData();
+        fd.append("file", arr[i]);
+        fd.append("batch_id", b.id);
+        fd.append("batch_no", b.batch_no);
+        fd.append("storage_type", storageType);
+        fd.append("default_product_name", defProduct);
+        fd.append("default_supplier", defSupplier);
+        if (purchaseDate) fd.append("purchase_date", purchaseDate);
+        if (unitCost) fd.append("unit_cost", unitCost);
+        const res = await fetch("/api/stock/ocr", { method: "POST", headers: AUTH, body: fd });
+        const json = await res.json();
+        // 처리 직후 중지를 눌렀으면 방금 생성건 취소(삭제)
+        if (stopRef.current) {
+          if (json.ok && json.row?.id) {
+            await fetch(`/api/stock/registration?id=${json.row.id}`, { method: "DELETE", headers: AUTH });
+          }
+          break;
+        }
+        if (!json.ok) toast.error(`${arr[i].name}: ${json.error}`);
+        done++;
+        setProgress({ done: done, total: arr.length });
+      }
+      await fetchRows(b.id);
+      toast[stopRef.current ? "info" : "success"](stopRef.current ? `중지됨 — ${done}장 처리` : `${done}장 업로드·OCR 완료`);
+    } finally {
+      setBusy(false);
+      setProgress(null);
+      stopRef.current = false;
+    }
+  };
+
+  const stop = () => { stopRef.current = true; };
+  const newBatch = () => { setBatch(null); setRows([]); setSelected(new Set()); };
+
+  const updateRow = (id: string, patch: Partial<Reg>) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const saveRow = async (r: Reg) => {
+    const res = await fetch("/api/stock/registration", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+      body: JSON.stringify({ id: r.id, patch: {
+        product_name: r.product_name, option_name: r.option_name, coupon_code: r.coupon_code,
+        expiry_date: r.expiry_date ?? "", supplier: r.supplier ?? "",
+        unit_cost: r.unit_cost ?? "", stored_as_code: r.stored_as_code, product_slug: r.product_slug ?? "",
+      } }),
+    });
+    const json = await res.json();
+    if (!json.ok) { toast.error("저장 실패: " + json.error); return; }
+    updateRow(r.id, json.row);
+    toast.success("저장됨");
+  };
+
+  // 영문 슬러그 AI 생성
+  const genSlug = async (r: Reg) => {
+    if (!r.product_name.trim()) { toast.error("상품명을 먼저 입력하세요"); return; }
+    const res = await fetch("/api/stock/slug", {
+      method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+      body: JSON.stringify({ product_name: r.product_name }),
+    });
+    const json = await res.json();
+    if (!json.ok) { toast.error("영문명 생성 실패: " + json.error); return; }
+    updateRow(r.id, { product_slug: json.slug });
+    toast.success(`영문명: ${json.slug}`);
+  };
+
+  const setStatus = async (r: Reg, status: "approved" | "pending") => {
+    const res = await fetch("/api/stock/registration", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+      body: JSON.stringify({ id: r.id, patch: { inspection_status: status } }),
+    });
+    const json = await res.json();
+    if (!json.ok) { toast.error(json.error); return; }
+    updateRow(r.id, { inspection_status: status });
+  };
+
+  const deleteRow = async (r: Reg) => {
+    if (!confirm("이 카드를 삭제합니다(이미지도 함께 삭제). 계속할까요?")) return;
+    const res = await fetch(`/api/stock/registration?id=${r.id}`, { method: "DELETE", headers: AUTH });
+    const json = await res.json();
+    if (!json.ok) { toast.error("삭제 실패: " + json.error); return; }
+    setRows((prev) => prev.filter((x) => x.id !== r.id));
+    setSelected((p) => { const s = new Set(p); s.delete(r.id); return s; });
+  };
+
+  // 선택 카드 일괄변경 (상품명/옵션명/유효기간)
+  const applyBulk = async () => {
+    const targets = rows.filter((r) => selected.has(r.id) && !r.published);
+    if (targets.length === 0) { toast.error("미발행 카드를 선택하세요"); return; }
+    if (bulkField === "expiry_date" && bulkValue && !/^\d{4}-\d{2}-\d{2}$/.test(bulkValue)) { toast.error("유효기간 형식 YYYY-MM-DD"); return; }
+    setBusy(true);
+    try {
+      for (const r of targets) {
+        const res = await fetch("/api/stock/registration", {
+          method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ id: r.id, patch: { [bulkField]: bulkValue } }),
+        });
+        const json = await res.json();
+        if (json.ok) updateRow(r.id, json.row);
+      }
+      toast.success(`${targets.length}건 일괄 변경 완료`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const publish = async () => {
+    const ids = rows.filter((r) => selected.has(r.id) && r.inspection_status === "approved" && !r.published).map((r) => r.id);
+    if (ids.length === 0) { toast.error("발행할 '승인'된 항목을 선택하세요"); return; }
+    if (!confirm(`${ids.length}건을 실제 재고로 발행합니다.\n- 코드형 → 비바콘 판매재고(coupon_codes)\n- 이미지형 → GCP 발송폴더\n발송기에 즉시 반영됩니다. 계속할까요?`)) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/stock/publish", { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify({ ids }) });
+      const json = await res.json();
+      if (!json.ok) { toast.error("발행 실패: " + json.error); return; }
+      toast.success(`${json.published}건 발행 완료${json.errors?.length ? ` / 실패 ${json.errors.length}` : ""}`);
+      if (json.errors?.length) console.warn("발행 실패:", json.errors);
+      if (batch) await fetchRows(batch.id);
+      setSelected(new Set());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approvedCount = rows.filter((r) => r.inspection_status === "approved" && !r.published).length;
+  const pendingCount = rows.filter((r) => r.inspection_status === "pending" && !r.published).length;
+  const publishedCount = rows.filter((r) => r.published).length;
+  const dupCount = rows.filter((r) => r.dup && !r.published).length;
+
+  return (
+    <div className="space-y-4">
+      {/* 비바콘 상품명 자동완성 목록 */}
+      <datalist id="vivacon-products">
+        {productOptions.map((n) => <option key={n} value={n} />)}
+      </datalist>
+
+      {/* 배치 설정 + 업로드 */}
+      <div className="rounded-xl border border-border bg-secondary/40 p-4 space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <span className="block text-xs text-muted-foreground mb-1">등록 유형</span>
+            <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={storageType}
+              onChange={(e) => setStorageType(e.target.value as "image" | "code")} disabled={!!batch}>
+              <option value="code">코드형 (Supabase 판매재고)</option>
+              <option value="image">이미지형 (GCP 발송폴더)</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="block text-xs text-muted-foreground mb-1">기본 상품명(선택)</span>
+            <input list="vivacon-products" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" placeholder="OCR 실패 시 사용"
+              value={defProduct} onChange={(e) => setDefProduct(e.target.value)} />
+          </label>
+          <label className="text-sm">
+            <span className="block text-xs text-muted-foreground mb-1">매입처</span>
+            <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={defSupplier} onChange={(e) => setDefSupplier(e.target.value)}>
+              <option value="">선택</option>
+              {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="block text-xs text-muted-foreground mb-1">매입일(선택)</span>
+            <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+              value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+          </label>
+          <label className="text-sm">
+            <span className="block text-xs text-muted-foreground mb-1">매입원가(선택)</span>
+            <input inputMode="numeric" className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+              value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className={cn("flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground", busy && "opacity-50 pointer-events-none")}>
+            <Upload className="h-4 w-4" />
+            기프티콘 이미지 업로드
+            <input type="file" accept="image/*" multiple className="hidden" disabled={busy}
+              onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+          </label>
+          {progress && (
+            <>
+              <span className="flex items-center gap-2 text-sm text-primary">
+                <Loader2 className="h-4 w-4 animate-spin" /> {progress.done}/{progress.total} 처리 중...
+              </span>
+              <button onClick={stop} className="flex items-center gap-1 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/20">
+                <StopCircle className="h-4 w-4" /> 중지
+              </button>
+            </>
+          )}
+          {batch && !progress && <span className="text-sm text-muted-foreground">현재 배치 <strong>{batch.batch_no}</strong></span>}
+          {batch && !progress && <button onClick={newBatch} className="text-xs text-muted-foreground hover:text-foreground underline">새 배치 시작</button>}
+          {batch && !progress && <button onClick={() => fetchRows(batch.id)} className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          업로드하면 GCP 저장 → Gemini OCR로 쿠폰번호·유효기간 자동 추출 → 아래에서 이미지 보며 검수·수정 후 <strong>승인 → 발행</strong>.
+        </p>
+      </div>
+
+      {/* 배치 요약 */}
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border bg-secondary/30 px-3 py-2 text-sm">
+          {batch && <span className="text-muted-foreground">배치 <strong className="text-foreground">{batch.batch_no}</strong></span>}
+          <span>전체 <strong>{rows.length}</strong></span>
+          <span className="text-amber-600">미검수 <strong>{pendingCount}</strong></span>
+          <span className="text-primary">승인 <strong>{approvedCount}</strong></span>
+          <span className="text-green-600">발행 <strong>{publishedCount}</strong></span>
+          {dupCount > 0 && <span className="text-red-600">⚠️중복 <strong>{dupCount}</strong></span>}
+        </div>
+      )}
+
+      {/* 일괄변경 + 발행 바 */}
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+          <span className="text-sm">선택 {selected.size}</span>
+          {selected.size > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground text-sm">|</span>
+              <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkField} onChange={(e) => { setBulkField(e.target.value as BulkField); setBulkValue(""); }}>
+                <option value="product_name">상품명</option>
+                <option value="option_name">옵션명</option>
+                <option value="expiry_date">유효기간</option>
+                <option value="supplier">매입처</option>
+              </select>
+              {bulkField === "expiry_date" ? (
+                <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
+              ) : bulkField === "supplier" ? (
+                <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}>
+                  <option value="">매입처 선택</option>
+                  {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              ) : (
+                <input list={bulkField === "product_name" ? "vivacon-products" : undefined} className="w-40 rounded-lg border border-border bg-background px-2 py-1.5 text-sm" placeholder="변경할 값" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
+              )}
+              <button onClick={applyBulk} disabled={busy} className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary disabled:opacity-50">일괄변경</button>
+            </div>
+          )}
+          <button onClick={publish} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            <Send className="h-4 w-4" /> 선택 발행
+          </button>
+        </div>
+      )}
+
+      {/* 검수 카드 목록 */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {rows.map((r) => (
+          <div key={r.id} className={cn("flex gap-3 rounded-xl border p-3",
+            r.published ? "border-green-500/40 bg-green-50/40 dark:bg-green-950/10" :
+            r.inspection_status === "approved" ? "border-primary/40 bg-primary/5" : "border-border")}>
+            {/* 이미지 (클릭 → 라이트박스) */}
+            <button type="button" onClick={() => { setLightbox(r.image_url); setScale(1); }} className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={r.image_url} alt="기프티콘" className="h-40 w-32 rounded-lg border border-border object-cover hover:opacity-80" />
+            </button>
+            {/* 필드 */}
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <span className={cn("font-medium", QUALITY_COLOR[r.extraction_quality])}>OCR {r.ocr_confidence ?? 0}점</span>
+                {r.dup && !r.published && <span className="rounded bg-red-100 px-1 font-medium text-red-600 dark:bg-red-950/40" title="이미 비바콘 재고에 있는 쿠폰번호">⚠️중복</span>}
+                {r.published && <span className="text-green-600 font-medium">✅발행됨</span>}
+                <label className="ml-auto flex items-center gap-1">
+                  <input type="checkbox" checked={selected.has(r.id)} disabled={r.published}
+                    onChange={(e) => setSelected((p) => { const s = new Set(p); e.target.checked ? s.add(r.id) : s.delete(r.id); return s; })} />
+                  선택
+                </label>
+                {!r.published && (
+                  <button onClick={() => deleteRow(r)} title="삭제" className="text-muted-foreground hover:text-destructive">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <input list="vivacon-products" className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs" placeholder="상품명(비바콘 검색)"
+                value={r.product_name} disabled={r.published}
+                onChange={(e) => { const v = e.target.value; updateRow(r.id, slugMap[v] ? { product_name: v, product_slug: slugMap[v] } : { product_name: v }); }} />
+              <input className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs" placeholder="옵션명"
+                value={r.option_name} disabled={r.published} onChange={(e) => updateRow(r.id, { option_name: e.target.value })} />
+              {/* 영문명(슬러그) — 이미지형 파일명에 사용 */}
+              <div className="flex gap-1.5">
+                <input className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs font-mono" placeholder="영문명(파일명용)"
+                  value={r.product_slug ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { product_slug: e.target.value })} />
+                {!r.published && (
+                  <button onClick={() => genSlug(r)} title="AI 영문명 생성" className="flex shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-xs text-primary hover:bg-primary/10">
+                    <Sparkles className="h-3 w-3" /> AI
+                  </button>
+                )}
+              </div>
+              <input className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs font-mono" placeholder="쿠폰번호"
+                value={r.coupon_code} disabled={r.published} onChange={(e) => updateRow(r.id, { coupon_code: e.target.value })} />
+              <div className="flex gap-1.5">
+                <input type="date" className="rounded-md border border-border bg-background px-2 py-1 text-xs" title="유효기간"
+                  value={r.expiry_date ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { expiry_date: e.target.value })} />
+                <select className="w-24 rounded-md border border-border bg-background px-1.5 py-1 text-xs" title="매입처"
+                  value={r.supplier ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { supplier: e.target.value })}>
+                  <option value="">매입처</option>
+                  {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+                <input inputMode="numeric" className="w-20 rounded-md border border-border bg-background px-2 py-1 text-right text-xs tabular-nums" placeholder="원가"
+                  value={r.unit_cost ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9-]/g, "")) })} />
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <select className="rounded-md border border-border bg-background px-1.5 py-1 text-xs" disabled={r.published}
+                  value={r.stored_as_code ? "code" : "image"} onChange={(e) => updateRow(r.id, { stored_as_code: e.target.value === "code" })}>
+                  <option value="code">코드형</option>
+                  <option value="image">이미지형</option>
+                </select>
+                {!r.published && (
+                  <>
+                    <button onClick={() => saveRow(r)} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-secondary">
+                      <Save className="h-3 w-3" /> 저장
+                    </button>
+                    {r.inspection_status === "approved" ? (
+                      <button onClick={() => setStatus(r, "pending")} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-amber-600">
+                        <RotateCcw className="h-3 w-3" /> 승인취소
+                      </button>
+                    ) : (
+                      <button onClick={() => setStatus(r, "approved")} className="flex items-center gap-1 rounded-md bg-primary/10 border border-primary/30 px-2 py-1 text-primary">
+                        <CheckCircle2 className="h-3 w-3" /> 승인
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {rows.length === 0 && !busy && (
+        <p className="py-8 text-center text-sm text-muted-foreground">이미지를 업로드하면 OCR 검수 카드가 여기 표시됩니다.</p>
+      )}
+
+      {/* 라이트박스 (화면 내 팝업 + 확대/축소) */}
+      {lightbox && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4" onClick={() => setLightbox(null)}>
+          <div className="absolute right-4 top-4 flex gap-2" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setScale((s) => Math.max(0.5, s - 0.25))} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/90 text-slate-800"><ZoomOut className="h-5 w-5" /></button>
+            <span className="flex h-10 min-w-14 items-center justify-center rounded-lg bg-white/90 text-sm text-slate-800">{Math.round(scale * 100)}%</span>
+            <button onClick={() => setScale((s) => Math.min(5, s + 0.25))} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/90 text-slate-800"><ZoomIn className="h-5 w-5" /></button>
+            <button onClick={() => setLightbox(null)} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/90 text-slate-800"><X className="h-5 w-5" /></button>
+          </div>
+          <div className="max-h-full max-w-full overflow-auto" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={lightbox} alt="확대" style={{ transform: `scale(${scale})`, transformOrigin: "center" }} className="max-w-none rounded-lg transition-transform" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

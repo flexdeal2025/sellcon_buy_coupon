@@ -88,8 +88,35 @@ npm run dev
 | `/new` | 매입 입력 (프리셋·양방향 계산기·순환 추천 회선 선택) | 입력 담당 |
 | `/inventory` | 재고 확인·마감 (부분 입고 추가·타임라인·완료 마감) | 입고 담당(배우자) |
 | `/manage` | 정산·세무 (손익 / AI분석 / 카드장부 / 매입대조 / 세무) | 공통 |
-| `/settings` | 설정 (회선 / 계정정보 / 프리셋) | 공통 |
+| `/settings` | 설정 (회선 / 계정정보 / 매입처 / 프리셋) | 공통 |
 | `/admin/architecture` | 사업방향 (자동화 아키텍처 맵) | 공통 |
+| `/vivacon` | 쿠폰재고 (외주 비바콘 coupon_codes 조회·수정) | 공통 |
+| `/stock` | 재고등록 (기프티콘 이미지 OCR → 코드형/이미지형 발행) | 공통 |
+| `/proof` | 증빙매핑 (당근/중고나라 거래증빙 ↔ 재고 1:1·N:1) | 공통 |
+
+## 📦 재고 이양 (외주 비바콘 시스템 → 자체 시스템)
+
+외주 스마트스토어 관리 시스템의 재고 등록·증빙 기능을 자체 시스템으로 이양 중. (상세: 로컬 `이양전략보고서_비바콘.md`)
+
+**구성**
+- **쿠폰재고(`/vivacon`)**: 외주 Supabase `coupon_codes`를 서버 경유로 조회·수정·일괄수정. service_role 키는 서버 전용.
+- **재고등록(`/stock`)**: 기프티콘 이미지 업로드 → GCP OCR버킷 저장 → Gemini OCR(상품명·쿠폰번호·유효기간) → 우리 Supabase `stock_registrations`에 스테이징(검수) → **발행** 시 코드형은 `coupon_codes` INSERT, 이미지형은 GCP `pending/{상품명}/{유효기간}/`로 복사. 이미지형 파일명 규칙: `매입일자_영문매입처_영문상품_쿠폰번호_유효기간.확장자`.
+- **증빙매핑(`/proof`)**: 거래증빙 이미지를 GCP `proof/`에 저장, `stock_registrations`와 1:1·N:1 연결, 매입처×매입일 누락 리포트.
+- **영문상품명 사전**: `vivacon_product_slugs`(상품명→영문 슬러그, `scripts/gen-product-slugs.mjs`로 일괄 생성). 매입처 영문명은 설정>매입처에서 직접 관리.
+
+**필요 SQL (Supabase SQL Editor 실행 순서)**
+1. `schema_stock_registration.sql` — 스테이징(stock_batches, stock_registrations)
+2. `schema_stock_slug.sql` — product_slug 컬럼
+3. `schema_stock_vendors_slugs.sql` — 매입처 마스터 + 영문상품명 사전 + supplier 컬럼
+4. `schema_purchase_proofs.sql` — 증빙 + 증빙↔재고 매핑
+   (※ `set_updated_at` 함수가 필요하므로 `schema_supplier_accounts.sql` 선행)
+
+**환경변수 (.env.local / Vercel 동일)**
+- `VIVACON_SUPABASE_URL`, `VIVACON_SUPABASE_SERVICE_KEY` — 외주 비바콘 Supabase (서버 전용)
+- `GCP_SA_KEY_B64` — GCP 서비스계정 키(JSON) base64, `GCP_OCR_BUCKET`, `GCP_GIFTICON_BUCKET`
+- `GEMINI_API_KEY`, (선택) `GEMINI_MODEL` (기본 gemini-2.5-flash-lite)
+
+**점검 스크립트** (읽기 전용): `node --env-file=.env.local scripts/inspect-stock.mjs` (테이블/건수), `inspect-gcp.mjs`(버킷), `inspect-ocr.mjs`(OCR)
 
 ## 🔁 순환 추천 로직
 
