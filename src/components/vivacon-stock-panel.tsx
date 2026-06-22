@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { stripVivacon } from "@/hooks/use-vivacon-products";
 import { Upload, Loader2, Save, CheckCircle2, RotateCcw, Send, RefreshCw, StopCircle, Trash2, ZoomIn, ZoomOut, X, Sparkles } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
@@ -44,11 +45,19 @@ export function VivaconStockPanel() {
   const [unitCost, setUnitCost] = useState("");
 
   const [batch, setBatch] = useState<{ id: string; batch_no: string } | null>(null);
+  const [batches, setBatches] = useState<{ id: string; batch_no: string; storage_type: string; purchase_date: string | null }[]>([]);
   const [rows, setRows] = useState<Reg[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pubFilter, setPubFilter] = useState<"unpublished" | "published" | "all">("unpublished");
+  const [lowFirst, setLowFirst] = useState(false);
   const stopRef = useRef(false);
+
+  // 코드 직접 입력(텍스트)
+  const [codesOpen, setCodesOpen] = useState(false);
+  const [codesText, setCodesText] = useState("");
+  const [codesExpiry, setCodesExpiry] = useState("");
 
   // 일괄변경
   const [bulkField, setBulkField] = useState<BulkField>("product_name");
@@ -75,7 +84,7 @@ export function VivaconStockPanel() {
       // 상품명 후보: 사전 + 스마트스토어 합집합
       const names = new Set<string>(Object.keys(map));
       for (const r of prods ?? []) {
-        const n = (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim();
+        const n = stripVivacon(r.name);
         if (n) names.add(n);
       }
       setSlugMap(map);
@@ -85,11 +94,34 @@ export function VivaconStockPanel() {
   }, []);
 
   const fetchRows = useCallback(async (batchId: string) => {
-    const res = await fetch(`/api/stock/registrations?batch_id=${batchId}&published=false`);
+    const params = new URLSearchParams({ batch_id: batchId });
+    if (pubFilter !== "all") params.set("published", pubFilter === "published" ? "true" : "false");
+    const res = await fetch(`/api/stock/registrations?${params}`);
     const json = await res.json();
     if (json.ok) setRows(json.rows);
     else toast.error("목록 조회 실패: " + json.error);
+  }, [pubFilter]);
+
+  // 발행상태 필터 변경 시 현재 배치 재조회
+  useEffect(() => { if (batch) fetchRows(batch.id); }, [pubFilter, batch, fetchRows]);
+
+  // 배치 목록 로드 (재진입용)
+  const loadBatches = useCallback(async () => {
+    const res = await fetch("/api/stock/batches");
+    const json = await res.json();
+    if (json.ok) setBatches(json.rows);
   }, []);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
+
+  // 기존 배치 재진입
+  const openBatch = (id: string) => {
+    const b = batches.find((x) => x.id === id);
+    if (!b) return;
+    setBatch({ id: b.id, batch_no: b.batch_no });
+    setStorageType(b.storage_type === "code" ? "code" : "image");
+    setSelected(new Set());
+    fetchRows(b.id);
+  };
 
   const onFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -135,11 +167,48 @@ export function VivaconStockPanel() {
         setProgress({ done: done, total: arr.length });
       }
       await fetchRows(b.id);
+      loadBatches();
       toast[stopRef.current ? "info" : "success"](stopRef.current ? `중지됨 — ${done}장 처리` : `${done}장 업로드·OCR 완료`);
     } finally {
       setBusy(false);
       setProgress(null);
       stopRef.current = false;
+    }
+  };
+
+  // 코드 텍스트 일괄등록
+  const submitCodes = async () => {
+    const codes = codesText.split(/[\r\n]+/).map((c) => c.trim()).filter(Boolean);
+    if (codes.length === 0) { toast.error("코드를 입력하세요(한 줄에 하나)"); return; }
+    setBusy(true);
+    try {
+      let b = batch;
+      if (!b) {
+        const res = await fetch("/api/stock/batch", {
+          method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ storage_type: "code", default_product_name: defProduct, default_exchange_location: defSupplier, purchase_date: purchaseDate || null }),
+        });
+        const json = await res.json();
+        if (!json.ok) { toast.error("배치 생성 실패: " + json.error); return; }
+        b = { id: json.batch.id, batch_no: json.batch.batch_no };
+        setBatch(b);
+      }
+      const res = await fetch("/api/stock/codes", {
+        method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+        body: JSON.stringify({
+          batch_id: b.id, codes,
+          product_name: defProduct, expiry_date: codesExpiry, supplier: defSupplier, unit_cost: unitCost,
+          product_slug: slugMap[defProduct] ?? "",
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) { toast.error("코드 등록 실패: " + json.error); return; }
+      toast.success(`${json.inserted}건 코드 등록`);
+      setCodesText("");
+      await fetchRows(b.id);
+      loadBatches();
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -236,6 +305,9 @@ export function VivaconStockPanel() {
   };
 
   const approvedCount = rows.filter((r) => r.inspection_status === "approved" && !r.published).length;
+  // 검수 우선: 저신뢰(low) 먼저
+  const qRank = (q: string) => (q === "low" ? 0 : q === "medium" ? 1 : q === "high" ? 2 : 3);
+  const displayRows = lowFirst ? [...rows].sort((a, b) => qRank(a.extraction_quality) - qRank(b.extraction_quality)) : rows;
   const pendingCount = rows.filter((r) => r.inspection_status === "pending" && !r.published).length;
   const publishedCount = rows.filter((r) => r.published).length;
   const dupCount = rows.filter((r) => r.dup && !r.published).length;
@@ -289,6 +361,16 @@ export function VivaconStockPanel() {
             <input type="file" accept="image/*" multiple className="hidden" disabled={busy}
               onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
           </label>
+          {/* 기존 배치 재진입 */}
+          {!progress && batches.length > 0 && (
+            <select className="rounded-lg border border-border bg-background px-2 py-2 text-sm"
+              value={batch?.id ?? ""} onChange={(e) => e.target.value && openBatch(e.target.value)}>
+              <option value="">기존 배치 불러오기…</option>
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>{b.batch_no} · {b.storage_type === "code" ? "코드" : "이미지"}{b.purchase_date ? ` · ${b.purchase_date}` : ""}</option>
+              ))}
+            </select>
+          )}
           {progress && (
             <>
               <span className="flex items-center gap-2 text-sm text-primary">
@@ -302,7 +384,26 @@ export function VivaconStockPanel() {
           {batch && !progress && <span className="text-sm text-muted-foreground">현재 배치 <strong>{batch.batch_no}</strong></span>}
           {batch && !progress && <button onClick={newBatch} className="text-xs text-muted-foreground hover:text-foreground underline">새 배치 시작</button>}
           {batch && !progress && <button onClick={() => fetchRows(batch.id)} className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>}
+          <button onClick={() => setCodesOpen((v) => !v)} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">
+            {codesOpen ? "코드 입력 닫기" : "코드 직접 입력(텍스트)"}
+          </button>
         </div>
+
+        {/* 코드 직접 입력 (이미지 OCR 없이) */}
+        {codesOpen && (
+          <div className="rounded-lg border border-border bg-background p-3 space-y-2">
+            <p className="text-xs text-muted-foreground">위 <strong>기본 상품명·매입처·매입원가</strong>가 공통 적용됩니다. 코드는 한 줄에 하나씩 붙여넣으세요. (채널 C 등 이미 글자로 된 코드용)</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-muted-foreground">유효기간</label>
+              <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={codesExpiry} onChange={(e) => setCodesExpiry(e.target.value)} />
+            </div>
+            <textarea className="h-32 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm font-mono" placeholder={"쿠폰번호1\n쿠폰번호2\n쿠폰번호3"} value={codesText} onChange={(e) => setCodesText(e.target.value)} />
+            <button onClick={submitCodes} disabled={busy} className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
+              {busy ? "등록 중..." : `코드 등록 (${codesText.split(/[\r\n]+/).map((c) => c.trim()).filter(Boolean).length}건)`}
+            </button>
+          </div>
+        )}
+
         <p className="text-xs text-muted-foreground">
           업로드하면 GCP 저장 → Gemini OCR로 쿠폰번호·유효기간 자동 추출 → 아래에서 이미지 보며 검수·수정 후 <strong>승인 → 발행</strong>.
         </p>
@@ -317,6 +418,19 @@ export function VivaconStockPanel() {
           <span className="text-primary">승인 <strong>{approvedCount}</strong></span>
           <span className="text-green-600">발행 <strong>{publishedCount}</strong></span>
           {dupCount > 0 && <span className="text-red-600">⚠️중복 <strong>{dupCount}</strong></span>}
+          <label className="ml-auto flex cursor-pointer items-center gap-1 text-xs text-muted-foreground">
+            <input type="checkbox" checked={lowFirst} onChange={(e) => setLowFirst(e.target.checked)} />
+            저신뢰 먼저
+          </label>
+          {/* 발행상태 보기 토글 */}
+          <div className="flex gap-1">
+            {([["unpublished", "검수중"], ["published", "발행완료"], ["all", "전체"]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setPubFilter(k)}
+                className={cn("rounded-md px-2 py-0.5 text-xs", pubFilter === k ? "bg-foreground text-background" : "bg-secondary text-muted-foreground")}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -354,7 +468,7 @@ export function VivaconStockPanel() {
 
       {/* 검수 카드 목록 */}
       <div className="grid gap-3 lg:grid-cols-2">
-        {rows.map((r) => (
+        {displayRows.map((r) => (
           <div key={r.id} className={cn("flex gap-3 rounded-xl border p-3",
             r.published ? "border-green-500/40 bg-green-50/40 dark:bg-green-950/10" :
             r.inspection_status === "approved" ? "border-primary/40 bg-primary/5" : "border-border")}>

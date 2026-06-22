@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2, PencilLine } from "lucide-react";
@@ -53,6 +54,7 @@ export function CardTaxPanel() {
   const [dateFrom, setDateFrom]         = useState("");
   const [dateTo, setDateTo]             = useState("");
   const [catFilter, setCatFilter]       = useState("");
+  const [cardNum, setCardNum]           = useState("");
   const [incompleteOnly, setIncomplete] = useState(false);
 
   /* ── 데이터 ────────────────────────────── */
@@ -73,6 +75,11 @@ export function CardTaxPanel() {
   const [companyList, setCompanyList] = useState<string[]>([]);
   const [ownerList, setOwnerList]     = useState<string[]>([]);
   const [yearList, setYearList]       = useState<string[]>([]);
+  const [cardNumberList, setCardNumberList] = useState<string[]>([]);
+
+  /* ── 카드별 합계 ───────────────────────── */
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryRows, setSummaryRows] = useState<{ card_company: string; card_number: string; cnt: number; total: number }[]>([]);
 
   /* ── 정렬 ──────────────────────────────── */
   const [sortKey, setSortKey] = useState<SortKey>("transaction_date");
@@ -86,7 +93,7 @@ export function CardTaxPanel() {
   const [supplierMap, setSupplierMap] = useState<SupplierMap[]>([]);
 
   /* ── 비바콘 상품명 자동완성([비바콘] 제거) ─ */
-  const [vivaconProducts, setVivaconProducts] = useState<string[]>([]);
+  const vivaconProducts = useVivaconProducts();
 
   /* ── 선택 / 일괄편집 ───────────────────── */
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -114,9 +121,10 @@ export function CardTaxPanel() {
     if (dateFrom)       q = q.gte("transaction_date", dateFrom);
     if (dateTo)         q = q.lte("transaction_date", dateTo);
     if (catFilter)      q = q.eq("cost_category", catFilter);
+    if (cardNum)        q = q.eq("card_number", cardNum);
     if (incompleteOnly) q = q.eq("cost_category", "");
     return q;
-  }, [company, owner, year, month, dateFrom, dateTo, catFilter, incompleteOnly]);
+  }, [company, owner, year, month, dateFrom, dateTo, catFilter, cardNum, incompleteOnly]);
 
   /* ── 통계 fetch ────────────────────────── */
   const fetchStats = useCallback(async () => {
@@ -135,14 +143,24 @@ export function CardTaxPanel() {
 
   /* ── 카드사 목록 fetch ─────────────────── */
   const fetchCompanies = useCallback(async () => {
-    const [{ data: co }, { data: ow }, { data: yr }] = await Promise.all([
+    const [{ data: co }, { data: ow }, { data: yr }, { data: cn }] = await Promise.all([
       sb.rpc("distinct_card_companies"),
       sb.rpc("distinct_card_owners"),
       sb.rpc("distinct_card_years"),
+      sb.rpc("distinct_card_numbers"), // RPC 없으면 cn=null → 드롭다운 숨김(graceful)
     ]);
     if (co?.length) setCompanyList((co as { card_company: string }[]).map((r) => r.card_company));
     if (ow?.length) setOwnerList((ow as { owner: string }[]).map((r) => r.owner));
     if (yr?.length) setYearList((yr as { year: string }[]).map((r) => r.year));
+    if (cn?.length) setCardNumberList((cn as { card_number: string }[]).map((r) => r.card_number));
+  }, [sb]);
+
+  /* ── 카드별 합계 fetch ─────────────────── */
+  const loadSummary = useCallback(async () => {
+    const { data, error } = await sb.rpc("card_number_summary");
+    if (error) { toast.error("카드별 합계 RPC 미설치(schema_card_distinct.sql 실행 필요)"); return; }
+    setSummaryRows((data as { card_company: string; card_number: string; cnt: number; total: number }[]) ?? []);
+    setSummaryOpen(true);
   }, [sb]);
 
   /* ── 행 fetch ──────────────────────────── */
@@ -184,24 +202,13 @@ export function CardTaxPanel() {
     if (data) setSupplierMap(data as SupplierMap[]);
   }, [sb]);
 
-  /* ── 비바콘 상품명 fetch ([비바콘] 제거) ── */
-  const fetchVivaconProducts = useCallback(async () => {
-    const { data } = await sb.from("smartstore_products").select("name").limit(3000);
-    if (!data) return;
-    const names = Array.from(new Set(
-      data.map((r) => (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim()).filter(Boolean),
-    )).sort();
-    setVivaconProducts(names);
-  }, [sb]);
-
-  useEffect(() => { fetchVivaconProducts(); }, [fetchVivaconProducts]);
   useEffect(() => { fetchOptions(); }, [fetchOptions]);
   useEffect(() => { fetchCompanies(); }, [fetchCompanies]);
   useEffect(() => { fetchRules(); }, [fetchRules]);
   useEffect(() => { fetchSupplierMap(); }, [fetchSupplierMap]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
   // 필터/페이지크기 변경 시 page 초기화
-  useEffect(() => { setPage(0); }, [company, owner, year, month, dateFrom, dateTo, catFilter, incompleteOnly, pageSize]);
+  useEffect(() => { setPage(0); }, [company, owner, year, month, dateFrom, dateTo, catFilter, cardNum, incompleteOnly, pageSize]);
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   /* ── 단일 필드 저장 ─────────────────────── */
@@ -449,6 +456,19 @@ export function CardTaxPanel() {
           ))}
         </select>
 
+        {cardNumberList.length > 0 && (
+          <select
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+            value={cardNum}
+            onChange={(e) => setCardNum(e.target.value)}
+          >
+            <option value="">전체 카드번호</option>
+            {cardNumberList.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        )}
+
         <label className="flex cursor-pointer items-center gap-1.5 text-sm">
           <input
             type="checkbox"
@@ -467,6 +487,13 @@ export function CardTaxPanel() {
           >
             <PencilLine className="h-3.5 w-3.5" />
             필터 전체 수정
+          </button>
+          <button
+            onClick={loadSummary}
+            title="카드사·카드번호별 건수와 합계 보기"
+            className="flex items-center gap-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary"
+          >
+            카드별 합계
           </button>
           <button
             onClick={applyRules}
@@ -492,6 +519,39 @@ export function CardTaxPanel() {
           </button>
         </div>
       </div>
+
+      {/* 카드별 합계 */}
+      {summaryOpen && (
+        <div className="rounded-xl border border-border">
+          <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-3 py-2">
+            <span className="text-sm font-medium">카드별 합계 (카드사 × 카드번호)</span>
+            <button onClick={() => setSummaryOpen(false)} className="text-xs text-muted-foreground hover:text-foreground">닫기</button>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 border-b border-border bg-secondary/30">
+                <tr>
+                  <th className="px-3 py-1.5 text-left">카드사</th>
+                  <th className="px-3 py-1.5 text-left">카드번호</th>
+                  <th className="px-3 py-1.5 text-right">건수</th>
+                  <th className="px-3 py-1.5 text-right">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaryRows.length === 0 && <tr><td colSpan={4} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
+                {summaryRows.map((s) => (
+                  <tr key={`${s.card_company}__${s.card_number}`} className="border-b border-border/40 hover:bg-secondary/30">
+                    <td className="px-3 py-1.5">{s.card_company}</td>
+                    <td className="px-3 py-1.5 tabular-nums">{s.card_number || "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{Number(s.cnt).toLocaleString()}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{Number(s.total).toLocaleString()}원</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 필터 전체 일괄수정 바 */}
       {scopeOpen && (

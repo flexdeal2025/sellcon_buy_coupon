@@ -94,7 +94,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const wide = WIDE_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   return (
-    <div className={cn("mx-auto flex min-h-screen w-full flex-col", wide ? "max-w-[1800px]" : "max-w-3xl lg:max-w-6xl")}>
+    <div className={cn("mx-auto flex min-h-screen w-full flex-col", wide ? "max-w-[1800px]" : "max-w-3xl lg:max-w-6xl xl:max-w-[1400px]")}>
       {/* 상단 헤더 */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-border bg-background/80 px-4 backdrop-blur">
         <Link href="/" className="flex shrink-0 items-center gap-2 whitespace-nowrap font-bold">

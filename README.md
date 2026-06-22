@@ -43,6 +43,27 @@ npm install
 > ℹ️ Realtime 이 동작하지 않으면 Supabase 대시보드 → **Database → Replication** 에서
 > `purchase_records`, `phone_lines` 테이블의 Realtime 이 켜져 있는지 확인하세요.
 
+#### 📜 전체 스키마 실행 순서 (기능별)
+
+각 기능을 쓰려면 아래 `schema_*.sql` 을 **SQL Editor에서 순서대로** 실행하세요. (이미 실행한 건 건너뛰어도 무방 — 모두 `IF NOT EXISTS`/`OR REPLACE`)
+
+| # | 파일 | 기능 |
+|---|---|---|
+| 0 | `schema.sql` | 회선·매입(기본) |
+| 1 | `schema_smartstore.sql` | 스마트스토어 상품/판매 + AI분석 |
+| 2 | `schema_settlements.sql` | 정산·손익 |
+| 3 | `schema_pnl_functions.sql` → `schema_pnl_functions_v2.sql` | 손익 RPC |
+| 4 | `schema_order_cost.sql` | 주문 원가 |
+| 5 | `schema_presets.sql` | 프리셋 |
+| 6 | `schema_supplier_statements.sql` · `schema_purchase_reconcile.sql` · `schema_merchant_supplier.sql` | 매입대조 |
+| 7 | `schema_card_tax.sql` → `schema_card_owner_period.sql` → `schema_card_rules.sql` → `schema_card_rules_amount_range.sql` → **`schema_card_distinct.sql`** | 카드장부(+카드번호 필터/합계) |
+| 8 | `schema_supplier_accounts.sql` | 계정정보 (+`set_updated_at` 함수 — 9·11에 선행 필요) |
+| 9 | `schema_stock_registration.sql` → `schema_stock_slug.sql` → `schema_stock_vendors_slugs.sql` | 재고등록(OCR) + 매입처·영문사전 |
+| 10 | **`schema_purchase_proofs.sql`** | 증빙매핑 |
+
+> ⚠️ **현재 미실행으로 확인된 스키마**(스모크 테스트 기준): **`schema_purchase_proofs.sql`**(증빙매핑 API 500), **`schema_card_distinct.sql`**(카드번호 필터/합계). 이 둘을 실행하면 해당 기능이 활성화됩니다.
+> 점검: `node --env-file=.env.local scripts/inspect-stock.mjs` (테이블 존재), `node scripts/smoke-api.mjs <배포URL>` (API 200 확인).
+
 ### 3) 텔레그램 봇 준비 (선택)
 
 1. [@BotFather](https://t.me/BotFather) 에서 `/newbot` 으로 봇 생성 → **토큰** 발급
@@ -117,6 +138,11 @@ npm run dev
 - `GEMINI_API_KEY`, (선택) `GEMINI_MODEL` (기본 gemini-2.5-flash-lite)
 
 **점검 스크립트** (읽기 전용): `node --env-file=.env.local scripts/inspect-stock.mjs` (테이블/건수), `inspect-gcp.mjs`(버킷), `inspect-ocr.mjs`(OCR)
+
+**운영 스크립트 (npm)**
+- `npm run gen-slugs` — 영문상품명 사전 **증분 갱신**(스마트스토어 신규 상품 동기화 후 실행, 기존 사전은 skip). 스마트스토어 갱신: `npm run sync`
+- `npm run smoke -- <배포URL>` — 읽기 API 스모크 테스트 (예: `npm run smoke -- https://sellcon-buy-coupon.vercel.app`)
+- `npm run evidence-report` — 적격증빙 없는 매입비중 리포트(월별·매입처별)
 
 ## 🔁 순환 추천 로직
 
