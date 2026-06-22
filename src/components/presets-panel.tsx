@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePresets } from "@/hooks/use-presets";
+import { getSupabaseClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,11 +18,27 @@ export function PresetsPanel() {
     removeProduct,
   } = usePresets();
 
+  // 비바콘 스마트스토어 상품명 자동완성 ([비바콘] 접두 제거)
+  const [vivaconProducts, setVivaconProducts] = useState<string[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await getSupabaseClient().from("smartstore_products").select("name").limit(3000);
+      if (!data) return;
+      const names = Array.from(new Set(
+        data.map((r: { name: string }) => (r.name ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim()).filter(Boolean),
+      )).sort();
+      setVivaconProducts(names);
+    })();
+  }, []);
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         매입 입력 화면에서 원터치로 선택할 매입처/상품명을 관리합니다. (모든 기기 공유)
       </p>
+      <datalist id="preset-vivacon-products">
+        {vivaconProducts.map((n) => <option key={n} value={n} />)}
+      </datalist>
       <PresetCard
         title="매입처 프리셋"
         items={suppliers}
@@ -34,7 +51,8 @@ export function PresetsPanel() {
         items={products}
         onAdd={addProduct}
         onRemove={removeProduct}
-        placeholder="예: 메가박스 2인패키지"
+        placeholder="예: 메가박스 2인패키지 (비바콘 상품명 검색)"
+        listId="preset-vivacon-products"
       />
     </div>
   );
@@ -46,12 +64,14 @@ function PresetCard({
   onAdd,
   onRemove,
   placeholder,
+  listId,
 }: {
   title: string;
   items: string[];
   onAdd: (v: string) => void;
   onRemove: (v: string) => void;
   placeholder: string;
+  listId?: string;
 }) {
   const [value, setValue] = useState("");
 
@@ -69,6 +89,7 @@ function PresetCard({
       <CardContent className="space-y-3">
         <div className="flex gap-2">
           <Input
+            list={listId}
             placeholder={placeholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
