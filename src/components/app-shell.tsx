@@ -94,15 +94,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const wide = WIDE_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   return (
-    <div className={cn("mx-auto flex min-h-screen w-full flex-col", wide ? "max-w-[1800px]" : "max-w-3xl")}>
+    <div className={cn("mx-auto flex min-h-screen w-full flex-col", wide ? "max-w-[1800px]" : "max-w-3xl lg:max-w-6xl")}>
       {/* 상단 헤더 */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur">
-        <Link href="/" className="flex items-center gap-2 font-bold">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-border bg-background/80 px-4 backdrop-blur">
+        <Link href="/" className="flex shrink-0 items-center gap-2 whitespace-nowrap font-bold">
           <span className="text-lg">🎟️</span>
           <span>기프티콘 매입</span>
         </Link>
         {/* 데스크톱 네비게이션 */}
-        <nav className="hidden gap-1 sm:flex">
+        <nav className="hidden min-w-0 gap-0.5 overflow-x-auto sm:flex">
           {NAV.map((g) => {
             const active = g.key === activeGroup.key;
             return (
@@ -110,7 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={g.key}
                 href={g.href}
                 className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
                   active
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground",
