@@ -37,7 +37,7 @@ export function VivaconProofPanel() {
   const [amount, setAmount] = useState("");
 
   // 누락 리포트
-  interface ReportRow { supplier: string; purchase_date: string; total: number; mapped: number; missing: number }
+  interface ReportRow { supplier: string; date: string; total: number; mapped: number; missing: number }
   const [report, setReport] = useState<ReportRow[]>([]);
   const [showReport, setShowReport] = useState(false);
   const loadReport = async () => {
@@ -195,7 +195,7 @@ export function VivaconProofPanel() {
       {showReport && (
         <div className="rounded-xl border border-border">
           <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-3 py-2">
-            <span className="text-sm font-medium">증빙 누락 리포트 (매입처 × 매입일)</span>
+            <span className="text-sm font-medium">증빙 누락 리포트 (매입처 × 등록일) · 행 클릭 시 해당 조건으로 필터</span>
             <button onClick={() => setShowReport(false)} className="text-xs text-muted-foreground hover:text-foreground">닫기</button>
           </div>
           <div className="overflow-x-auto">
@@ -203,7 +203,7 @@ export function VivaconProofPanel() {
               <thead className="border-b border-border bg-secondary/30">
                 <tr>
                   <th className="px-3 py-1.5 text-left">매입처</th>
-                  <th className="px-3 py-1.5 text-left">매입일</th>
+                  <th className="px-3 py-1.5 text-left">등록일</th>
                   <th className="px-3 py-1.5 text-right">전체</th>
                   <th className="px-3 py-1.5 text-right">연결</th>
                   <th className="px-3 py-1.5 text-right">미연결</th>
@@ -211,15 +211,25 @@ export function VivaconProofPanel() {
               </thead>
               <tbody>
                 {report.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
-                {report.map((r) => (
-                  <tr key={`${r.supplier}__${r.purchase_date}`} className={cn("border-b border-border/40", r.missing > 0 && "bg-amber-50/40 dark:bg-amber-950/10")}>
+                {report.map((r) => {
+                  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(r.date);
+                  const applyFilter = () => {
+                    setSupplier(r.supplier === "(미지정)" ? "" : r.supplier);
+                    setDateFilter(validDate ? r.date : "");
+                    setMappedFilter("false");
+                    setShowReport(false);
+                  };
+                  return (
+                  <tr key={`${r.supplier}__${r.date}`} onClick={applyFilter}
+                    className={cn("cursor-pointer border-b border-border/40 hover:bg-primary/5", r.missing > 0 && "bg-amber-50/40 dark:bg-amber-950/10")}>
                     <td className="px-3 py-1.5">{r.supplier}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap">{r.purchase_date}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{r.date}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{r.total}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-green-600">{r.mapped}</td>
                     <td className={cn("px-3 py-1.5 text-right tabular-nums font-medium", r.missing > 0 ? "text-amber-600" : "text-muted-foreground")}>{r.missing}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
