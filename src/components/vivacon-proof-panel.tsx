@@ -116,6 +116,36 @@ export function VivaconProofPanel() {
     }
   };
 
+  // 순차 자동매핑: 현재 화면 미연결 재고 N개 ↔ 미연결 증빙 N개를 날짜순 1:1
+  const autoMapSequential = async () => {
+    const unmapped = displayedInventory
+      .filter((r) => !r.proof_id)
+      .slice()
+      .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+    let fresh = proofs.filter((p) => p.linked_count === 0);
+    if (dateFilter) fresh = fresh.filter((p) => (p.proof_date ?? "") === dateFilter);
+    fresh = fresh.slice().sort((a, b) => (a.proof_date ?? "9999").localeCompare(b.proof_date ?? "9999"));
+    const n = Math.min(unmapped.length, fresh.length);
+    if (n === 0) { toast.error("자동매핑할 미연결 재고/증빙이 없습니다"); return; }
+    if (!confirm(`미연결 재고 ${unmapped.length}건 · 미연결 증빙 ${fresh.length}건 중\n앞에서부터 ${n}건을 날짜순으로 1:1 자동 연결합니다. 계속할까요?`)) return;
+    setBusy(true);
+    try {
+      let ok = 0;
+      for (let i = 0; i < n; i++) {
+        const res = await fetch("/api/proof/link", {
+          method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ proof_id: fresh[i].id, registration_ids: [unmapped[i].id] }),
+        });
+        if ((await res.json()).ok) ok++;
+      }
+      toast.success(`${ok}건 순차 자동매핑 완료`);
+      setSelectedRegs(new Set());
+      await Promise.all([fetchProofs(), fetchInventory()]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deleteProof = async (id: string) => {
     if (!confirm("이 증빙을 삭제합니다(이미지·연결 함께 삭제). 계속할까요?")) return;
     const res = await fetch(`/api/proofs?id=${id}`, { method: "DELETE", headers: AUTH });
@@ -247,10 +277,15 @@ export function VivaconProofPanel() {
 
         {/* 우: 재고 */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium">재고 {total}건</span>
+            <button onClick={autoMapSequential} disabled={busy}
+              title="현재 화면의 미연결 재고와 미연결 증빙을 날짜순으로 1:1 자동 연결"
+              className="ml-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm text-primary hover:bg-primary/10 disabled:opacity-40">
+              <Link2 className="h-4 w-4" /> 순차 자동매핑
+            </button>
             <button onClick={linkSelected} disabled={busy || !activeProof || selectedRegs.size === 0}
-              className="ml-auto flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40">
+              className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40">
               <Link2 className="h-4 w-4" /> 활성 증빙에 {selectedRegs.size}건 연결
             </button>
           </div>
