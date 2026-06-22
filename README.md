@@ -139,6 +139,11 @@ npm run dev
 
 **점검 스크립트** (읽기 전용): `node --env-file=.env.local scripts/inspect-stock.mjs` (테이블/건수), `inspect-gcp.mjs`(버킷), `inspect-ocr.mjs`(OCR)
 
+**운영 스크립트 (npm)**
+- `npm run gen-slugs` — 영문상품명 사전 **증분 갱신**(스마트스토어 신규 상품 동기화 후 실행, 기존 사전은 skip). 스마트스토어 갱신: `npm run sync`
+- `npm run smoke -- <배포URL>` — 읽기 API 스모크 테스트 (예: `npm run smoke -- https://sellcon-buy-coupon.vercel.app`)
+- `npm run evidence-report` — 적격증빙 없는 매입비중 리포트(월별·매입처별)
+
 ## 🔁 순환 추천 로직
 
 `src/lib/rotation.ts`

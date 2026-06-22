@@ -11,7 +11,10 @@
     "analyze": "node --env-file=.env.local scripts/analyze-smartstore.mjs",
     "probe:settle": "node --env-file=.env.local scripts/probe-settlement.mjs",
     "backfill": "node --env-file=.env.local scripts/backfill-settlements.mjs",
-    "card-tax": "node --env-file=.env.local scripts/import-card-tax.mjs"
+    "card-tax": "node --env-file=.env.local scripts/import-card-tax.mjs",
+    "gen-slugs": "node --env-file=.env.local scripts/gen-product-slugs.mjs",
+    "smoke": "node scripts/smoke-api.mjs",
+    "evidence-report": "node --env-file=.env.local scripts/evidence-report.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",
