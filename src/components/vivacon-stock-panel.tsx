@@ -44,6 +44,7 @@ export function VivaconStockPanel() {
   const [unitCost, setUnitCost] = useState("");
 
   const [batch, setBatch] = useState<{ id: string; batch_no: string } | null>(null);
+  const [batches, setBatches] = useState<{ id: string; batch_no: string; storage_type: string; purchase_date: string | null }[]>([]);
   const [rows, setRows] = useState<Reg[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -97,6 +98,24 @@ export function VivaconStockPanel() {
   // 발행상태 필터 변경 시 현재 배치 재조회
   useEffect(() => { if (batch) fetchRows(batch.id); }, [pubFilter, batch, fetchRows]);
 
+  // 배치 목록 로드 (재진입용)
+  const loadBatches = useCallback(async () => {
+    const res = await fetch("/api/stock/batches");
+    const json = await res.json();
+    if (json.ok) setBatches(json.rows);
+  }, []);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
+
+  // 기존 배치 재진입
+  const openBatch = (id: string) => {
+    const b = batches.find((x) => x.id === id);
+    if (!b) return;
+    setBatch({ id: b.id, batch_no: b.batch_no });
+    setStorageType(b.storage_type === "code" ? "code" : "image");
+    setSelected(new Set());
+    fetchRows(b.id);
+  };
+
   const onFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const arr = Array.from(files); // await 전에 즉시 스냅샷
@@ -141,6 +160,7 @@ export function VivaconStockPanel() {
         setProgress({ done: done, total: arr.length });
       }
       await fetchRows(b.id);
+      loadBatches();
       toast[stopRef.current ? "info" : "success"](stopRef.current ? `중지됨 — ${done}장 처리` : `${done}장 업로드·OCR 완료`);
     } finally {
       setBusy(false);
@@ -295,6 +315,16 @@ export function VivaconStockPanel() {
             <input type="file" accept="image/*" multiple className="hidden" disabled={busy}
               onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
           </label>
+          {/* 기존 배치 재진입 */}
+          {!progress && batches.length > 0 && (
+            <select className="rounded-lg border border-border bg-background px-2 py-2 text-sm"
+              value={batch?.id ?? ""} onChange={(e) => e.target.value && openBatch(e.target.value)}>
+              <option value="">기존 배치 불러오기…</option>
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>{b.batch_no} · {b.storage_type === "code" ? "코드" : "이미지"}{b.purchase_date ? ` · ${b.purchase_date}` : ""}</option>
+              ))}
+            </select>
+          )}
           {progress && (
             <>
               <span className="flex items-center gap-2 text-sm text-primary">
