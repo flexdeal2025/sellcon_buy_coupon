@@ -16,7 +16,7 @@ interface Proof {
 interface Reg {
   id: string; product_name: string; option_name: string; coupon_code: string;
   expiry_date: string | null; supplier: string; stored_as_code: boolean; published: boolean;
-  proof_id: string | null;
+  proof_id: string | null; created_at: string | null; purchase_date: string | null;
 }
 
 export function VivaconProofPanel() {
@@ -253,6 +253,7 @@ export function VivaconProofPanel() {
                   <th className="px-2 py-1.5 text-left">상품명</th>
                   <th className="px-2 py-1.5 text-left">쿠폰번호</th>
                   <th className="px-2 py-1.5 text-left">유효기간</th>
+                  <th className="px-2 py-1.5 text-left">등록일</th>
                   <th className="px-2 py-1.5 text-center">증빙</th>
                 </tr>
               </thead>
@@ -266,6 +267,7 @@ export function VivaconProofPanel() {
                     <td className="px-2 py-1.5 truncate max-w-32" title={r.product_name}>{r.product_name}{r.option_name && ` (${r.option_name})`}</td>
                     <td className="px-2 py-1.5 font-mono truncate max-w-28" title={r.coupon_code}>{r.coupon_code}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{r.expiry_date ?? "-"}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.purchase_date ? `매입일 ${r.purchase_date}` : undefined}>{(r.created_at ?? "").slice(0, 10) || "-"}</td>
                     <td className="px-2 py-1.5 text-center">
                       {r.proof_id ? (
                         <button onClick={() => unlink(r.id)} title="연결 해제" className="inline-flex items-center gap-0.5 text-green-600 hover:text-destructive">
@@ -275,7 +277,7 @@ export function VivaconProofPanel() {
                     </td>
                   </tr>
                 ))}
-                {inventory.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
+                {inventory.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
               </tbody>
             </table>
           </div>
