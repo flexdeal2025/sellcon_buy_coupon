@@ -103,7 +103,15 @@ function parseSheet(ws, sheetName, company) {
 
   // 정규화 이름으로 컬럼 인덱스 탐지
   const col = (name) => headers.findIndex(h => norm(h) === norm(name));
-  const findFirst = (cands) => { for (const n of cands) { const i = col(n); if (i !== -1) return i; } return -1; };
+  const findFirst = (cands, exclude) => {
+    for (const n of cands) {
+      const i = col(n);
+      if (i === -1) continue;
+      if (exclude?.length && exclude.some(ex => norm(headers[i]).includes(norm(ex)))) continue;
+      return i;
+    }
+    return -1;
+  };
 
   const records = [];
 
@@ -133,7 +141,11 @@ function parseSheet(ws, sheetName, company) {
   // 일반 처리 — 거래일 기준 = '매출일자'(실제 거래일)를 '매입일자'(청구일)보다 우선.
   //   → 작년 거래의 환불건은 매출일자가 전년도(2024)로 표시되는 게 정상.
   const DATE_COLS  = ['이용일', '매출일자', '매입일자', '거래일', '거래일자', '접수일자'];
-  const AMT_COLS   = ['매출금액', '이용금액', '이용금액(원)', '매출금액(원)', '원화사용금액', '승인금액'];
+  // 승인/이용금액(실제 결제액) 우선 → 매출금액(가맹점 신고액, 면세·간이과세=0 가능) 후순위
+  const AMT_COLS   = ['승인금액', '이용금액', '이용금액(원)', '원화사용금액', '매출금액', '매출금액(원)'];
+  // 부가세·공급가액 컬럼이 AMT 후보에 걸리지 않도록 명시 제외
+  const EXCLUDE_AMT = ['부가세', '공급가액', '공급가', '세액'];
+
   const MERCH_COLS = ['가맹점명', '거래처'];
   const CARD_COLS  = ['카드번호', '이용카드(뒤4자리)', '이용카드'];
 
@@ -141,11 +153,17 @@ function parseSheet(ws, sheetName, company) {
   // 폴백: 헤더가 2행으로 분리된 시트(예: 제주은행 "거래"+"일자")는 날짜 컬럼명을 못 찾음.
   //       첫 컬럼이 날짜로 파싱되면 첫 컬럼을 거래일로 사용.
   if (iDate === -1 && dataRows.some(r => parseDate(r[0]))) iDate = 0;
-  const iAmt   = findFirst(AMT_COLS);
+  const iAmt   = findFirst(AMT_COLS, EXCLUDE_AMT);
   const iMerch = findFirst(MERCH_COLS);
   const iCard  = findFirst(CARD_COLS);
   const iProd  = col('품명');
   const iCat   = col('비용 구분');
+
+  if (DRY) {
+    const hNames = headers.map((h, i) => `[${i}]${norm(h) || '(빈)'}`).join(' | ');
+    console.log(`    헤더: ${hNames}`);
+    console.log(`    감지: 날짜=[${iDate}]${headers[iDate] ?? '?'} 금액=[${iAmt}]${headers[iAmt] ?? '?'} 가맹점=[${iMerch}]${headers[iMerch] ?? '?'}`);
+  }
 
   dataRows.forEach((row, idx) => {
     records.push({
