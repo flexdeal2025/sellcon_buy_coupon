@@ -14,7 +14,9 @@
     "card-tax": "node --env-file=.env.local scripts/import-card-tax.mjs",
     "gen-slugs": "node --env-file=.env.local scripts/gen-product-slugs.mjs",
     "smoke": "node scripts/smoke-api.mjs",
-    "evidence-report": "node --env-file=.env.local scripts/evidence-report.mjs"
+    "evidence-report": "node --env-file=.env.local scripts/evidence-report.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",
@@ -47,6 +49,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }

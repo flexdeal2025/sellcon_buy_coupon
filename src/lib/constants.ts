@@ -32,3 +32,7 @@ export const LS_KEYS = {
 
 // 작업자(부부) 기본 후보
 export const DEFAULT_WORKERS = ["남편", "아내"];
+
+// '[비바콘] 별도 결제 상품' — 실제 기프티콘 아닌 결제 패스스루용 더미상품.
+// 매출로는 잡되 케이스별로 건별 원가(order_cost)를 직접 입력해야 함(손익 화면 가이드).
+export const BYEOLDO_CHANNEL_PRODUCT_NO = 11614544910;
