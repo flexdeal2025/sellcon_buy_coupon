@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatKRW, cn, toDateInput } from "@/lib/utils";
+import { BYEOLDO_CHANNEL_PRODUCT_NO } from "@/lib/constants";
 import {
   Loader2,
   TrendingUp,
@@ -62,6 +63,10 @@ interface Summary {
   miss_rev: number;
   miss_cnt: number;
   miss_products: number;
+  // 결제 조정(별도결제 등 손익 제외 상품) — schema_pnl_exclude.sql 적용 후 채워짐.
+  // 미적용 시 RPC가 반환 안 함 → n()으로 0 처리(화면 안전).
+  adj_rev: number;
+  adj_cnt: number;
 }
 interface PeriodRow {
   period: string;
@@ -268,6 +273,7 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
         s ? {
           matched_rev: n(s.matched_rev), cost: n(s.cost), profit: n(s.profit),
           miss_rev: n(s.miss_rev), miss_cnt: n(s.miss_cnt), miss_products: n(s.miss_products),
+          adj_rev: n(s.adj_rev), adj_cnt: n(s.adj_cnt),
         } : null,
       );
       setProductRank(
@@ -407,6 +413,17 @@ function Dashboard({ onGoCost }: { onGoCost: () => void }) {
             <p className="text-muted-foreground">미입력 매출 {formatKRW(summary.miss_rev)}는 수익 계산에서 제외됨. 탭하여 원가를 입력하세요 →</p>
           </div>
         </button>
+      )}
+
+      {/* ── 결제 조정(별도결제 등 손익 제외 상품) 안내 ── */}
+      {summary && summary.adj_cnt > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-secondary p-3">
+          <ArrowLeftRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="text-sm">
+            <p className="font-semibold">결제 조정 {formatKRW(summary.adj_rev)} ({summary.adj_cnt}건)</p>
+            <p className="text-muted-foreground">별도 결제·조정성 상품(실제 기프티콘 아님)으로, 손익 계산에서 제외됨. 정산 매출 기록에는 그대로 남아 있습니다.</p>
+          </div>
+        </div>
       )}
 
       {/* ── 요약 카드 ── */}
@@ -776,9 +793,11 @@ function OrderCostSection({
   channelNo, orderCostMap, onChanged,
 }: { channelNo: number; orderCostMap: Map<string, OrderCost>; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
+  const [hintOpen, setHintOpen] = useState(false);
   const [orders, setOrders] = useState<OrderRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const LIMIT = 200;
+  const isByeoldo = channelNo === BYEOLDO_CHANNEL_PRODUCT_NO;
 
   async function load() {
     setLoading(true);
@@ -821,6 +840,26 @@ function OrderCostSection({
       </button>
       {open && (
         <div className="space-y-1.5">
+          {/* 별도 결제 상품 전용: 케이스별 원가 입력 가이드(이중계상 주의) */}
+          {isByeoldo && (
+            <div className="rounded-lg border border-warning/40 bg-warning/5 p-2.5 text-xs">
+              <button onClick={() => setHintOpen((v) => !v)} className="flex w-full items-center gap-1.5 text-left font-semibold text-warning">
+                {hintOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                별도결제 원가 입력 가이드 (3케이스 · ⚠️이중계상 주의)
+              </button>
+              {hintOpen && (
+                <div className="mt-2 space-y-2 text-muted-foreground">
+                  <p>매출은 결제금액 그대로 잡되, <strong>케이스마다 입력할 매입원가가 다릅니다.</strong></p>
+                  <ul className="space-y-1.5">
+                    <li><strong className="text-foreground">① 대량 일괄결제</strong> (다른 정상주문 없음)<br />→ 전달한 쿠폰들 <strong>매입원가 합계</strong> 입력</li>
+                    <li><strong className="text-foreground">② 오발송 차액</strong> (A주문에 A원가 이미 반영, 더 비싼 B 발송 후 차액 결제)<br />→ <strong>차액분만 = (B원가 − A원가)</strong>. B 전액 넣으면 A+B 이중계상!</li>
+                    <li><strong className="text-foreground">③ 반품 후 쿠폰사용</strong> (반품된 A주문은 손익에서 이미 빠짐)<br />→ <strong>A쿠폰 원가 전액</strong>. 안 넣으면 수익 과대·세금 더 냄</li>
+                  </ul>
+                  <p className="border-t border-warning/20 pt-1.5">메모(note) 권장 형식:<br /><code className="text-[11px]">[케이스#] 원주문:#XXX / 상품:OOO / 매입근거:YYMMDD 매입처 / 톡톡:일시(캡처) / 이중계상확인 ✓</code></p>
+                </div>
+              )}
+            </div>
+          )}
           {loading ? (
             <div className="flex justify-center py-3 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
           ) : sorted.length === 0 ? (
