@@ -144,9 +144,12 @@ export async function POST(req: Request) {
     const destPath = `${ymd}/${batchNo}/${crypto.randomUUID()}.${isPng ? "png" : "jpg"}`;
     await uploadOcrImage(destPath, buf, mime);
 
-    // OCR (실패해도 빈값 등록 → 모바일 검수에서 보정)
+    // OCR (실패해도 빈값 등록 → 모바일 검수에서 보정). 실패사유는 ocr_raw 보존 + 회신 노출
     let ocr = { product_name: "", coupon_code: "", expiry_date: "", exchange_location: "", confidence: 0 };
-    try { ocr = (await ocrGifticon(buf.toString("base64"), mime)).result; } catch { /* keep empty */ }
+    let raw: unknown = null;
+    let ocrErr = "";
+    try { const r = await ocrGifticon(buf.toString("base64"), mime); ocr = r.result; raw = r.raw; }
+    catch (e) { ocrErr = e instanceof Error ? e.message : "ocr failed"; raw = { ocr_error: ocrErr }; }
 
     const { error: ie } = await sb.from("stock_registrations").insert({
       batch_id: batchId,
@@ -159,6 +162,7 @@ export async function POST(req: Request) {
       purchase_date: purchaseDate,
       ocr_confidence: ocr.confidence,
       extraction_quality: quality(ocr.confidence),
+      ocr_raw: raw,
       inspection_status: "pending",
       stored_as_code: true,
     });
@@ -166,7 +170,8 @@ export async function POST(req: Request) {
 
     const codeMask = ocr.coupon_code ? ocr.coupon_code.slice(0, 2) + "***" : "(코드 미인식)";
     const ctxNote = !purchaseDate && !supplier ? "\n⚠️ 매입일·매입처 미설정 — 먼저 'YYMMDD 매입처' 한 줄을 보내세요." : "";
-    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""}${purchaseDate ? ` · ${purchaseDate}` : ""}${ctxNote}`);
+    const ocrNote = ocrErr ? `\n⚠️ OCR 실패: ${ocrErr}` : (!ocr.product_name && !ocr.coupon_code ? "\n⚠️ OCR 인식 0건 — 검수에서 수동 입력하세요." : "");
+    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""}${purchaseDate ? ` · ${purchaseDate}` : ""}${ctxNote}${ocrNote}`);
     return NextResponse.json({ ok: true, batch: batchNo });
   } catch (e) {
     await reply("⚠️ 처리 실패: " + (e instanceof Error ? e.message : "오류"));
