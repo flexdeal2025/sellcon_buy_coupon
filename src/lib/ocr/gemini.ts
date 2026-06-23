@@ -26,23 +26,31 @@ export async function ocrGifticon(
 ): Promise<{ result: OcrResult; raw: unknown }> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY 미설정");
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
+  const models = [
+    process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+  ];
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        { parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] },
-      ],
-      generationConfig: { response_mime_type: "application/json" },
-    }),
+  const body = JSON.stringify({
+    contents: [
+      { parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] },
+    ],
+    generationConfig: { response_mime_type: "application/json" },
   });
 
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Gemini 오류 (${res.status}): ${t.slice(0, 300)}`);
+  let res: Response | null = null;
+  const MAX_TRIES = 3;
+  for (let i = 0; i < MAX_TRIES; i++) {
+    const model = i < 2 ? models[0] : models[1];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    if (res.ok || (res.status !== 429 && res.status !== 503)) break;
+    if (i < MAX_TRIES - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+  }
+
+  if (!res?.ok) {
+    const t = await res?.text().catch(() => "") ?? "";
+    throw new Error(`Gemini 오류 (${res?.status}): ${t.slice(0, 300)}`);
   }
 
   const data = await res.json();
