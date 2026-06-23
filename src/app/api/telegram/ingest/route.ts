@@ -76,6 +76,68 @@ async function resolveOptionName(
   return hit?.option_name ?? DEFAULT_OPTION;
 }
 
+// YYMMDD 문자열 (매입일 우선, 없으면 오늘) — 배치명·경로 공통
+function ymdOf(purchaseDate: string | null): string {
+  if (purchaseDate) return String(purchaseDate).replaceAll("-", "").slice(2);
+  const now = new Date();
+  return `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+}
+
+// 배치 확보(없으면 생성). batchNo = TG-YYMMDD[-매입처]. (이미지·코드 경로 공통)
+async function ensureBatch(
+  sb: ReturnType<typeof getServerSupabase>,
+  batchNo: string, supplier: string, purchaseDate: string | null,
+): Promise<string> {
+  const { data: existing } = await sb.from("stock_batches").select("id").eq("batch_no", batchNo).maybeSingle();
+  if (existing?.id) return existing.id as string;
+  const { data: nb, error: be } = await sb.from("stock_batches")
+    .insert({ batch_no: batchNo, storage_type: "code", default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
+    .select("id").single();
+  if (be) throw new Error(be.message);
+  return nb.id as string;
+}
+
+// 유효기간 경고 (YYYY-MM-DD). 만료=🔴 / 임박(D-10 이내)=🟡 / 그 외·미인식="".
+// 기본 판매 약속이 '유효기간 최소 10일 이상'이므로 10일을 임박 기준으로 둔다.
+function expiryWarning(expiry: string | null | undefined): string {
+  if (!expiry) return "";
+  const d = new Date(`${expiry}T00:00:00`);
+  if (isNaN(d.getTime())) return "";
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.floor((d.getTime() - today.getTime()) / 86400000);
+  if (days < 0) return `\n🔴 만료됨(${expiry}) — 등록 보류 권장`;
+  if (days <= 10) return `\n🟡 유효기간 임박(${expiry}, D-${days})`;
+  return "";
+}
+
+// 직전 등록 id 묶음을 컨텍스트에 저장('취소' 명령용).
+// last_insert_ids 컬럼이 없으면(마이그레이션 미적용) 조용히 무시 — 정상흐름 보존.
+async function storeLastIds(
+  sb: ReturnType<typeof getServerSupabase>,
+  chatId: number | undefined, ids: string[],
+): Promise<void> {
+  if (chatId == null || !ids.length) return;
+  try { await sb.from("telegram_ingest_context").update({ last_insert_ids: ids }).eq("chat_id", String(chatId)); }
+  catch { /* 컬럼 미존재 등 — 무시 */ }
+}
+
+// 코드 묶음 중복 카운트(읽기전용): 스테이징 + 비바콘 재고에 이미 있는 코드 수
+async function countDuplicateCodes(
+  sb: ReturnType<typeof getServerSupabase>,
+  codes: string[],
+): Promise<number> {
+  const found = new Set<string>();
+  const { data: stg } = await sb.from("stock_registrations").select("coupon_code").in("coupon_code", codes);
+  (stg ?? []).forEach((r: { coupon_code: string }) => r.coupon_code && found.add(r.coupon_code));
+  try {
+    const { getVivaconSupabase } = await import("@/lib/supabase/vivacon");
+    const vc = getVivaconSupabase();
+    const { data: vcRows } = await vc.from("coupon_codes").select("coupon_code").in("coupon_code", codes);
+    (vcRows ?? []).forEach((r: { coupon_code: string }) => r.coupon_code && found.add(r.coupon_code));
+  } catch { /* vivacon 미연결 시 무시 */ }
+  return codes.filter((c) => found.has(c)).length;
+}
+
 // 텔레그램 수집 봇 webhook
 //  · 텍스트 "260623 당근마켓"  → 채팅방 '현재 매입 컨텍스트' 갱신(매입일·매입처)
 //  · 텍스트 "코드\n상품명\nYYMMDD" → 코드모드 진입(상품명 매칭+유효기간)
@@ -130,6 +192,25 @@ export async function POST(req: Request) {
       await reply("🔒 수집 종료. 이미지를 올려도 등록되지 않습니다.\n다시 시작하려면 'YYMMDD 매입처'를 보내세요.");
       return NextResponse.json({ ok: true, stopped: true });
     }
+    // ── 취소: 직전 등록 묶음 되돌리기(검수대기·미발행만 삭제) ──
+    if (/^(취소|되돌리기|undo)$/i.test(text) && chatId != null) {
+      const { data: ctx } = await sb.from("telegram_ingest_context").select("*").eq("chat_id", String(chatId)).maybeSingle();
+      const ids = (ctx?.last_insert_ids as string[] | undefined) ?? null;
+      if (!ids || ids.length === 0) {
+        await reply("↩️ 취소할 직전 등록이 없습니다.\n(업데이트 미적용 시 schema_telegram_ingest_v2.sql 실행 필요)");
+        return NextResponse.json({ ok: true, cancelled: 0 });
+      }
+      // 안전 가드: 검수대기(pending) + 미발행(published=false) 행만 삭제
+      const { data: del, error: de } = await sb.from("stock_registrations")
+        .delete().in("id", ids).eq("inspection_status", "pending").eq("published", false)
+        .select("id");
+      if (de) { await reply("⚠️ 취소 실패: " + de.message); return NextResponse.json({ ok: true }); }
+      const removed = del?.length ?? 0;
+      const protectedN = ids.length - removed;
+      try { await sb.from("telegram_ingest_context").update({ last_insert_ids: [] }).eq("chat_id", String(chatId)); } catch { /* noop */ }
+      await reply(`↩️ 직전 등록 ${removed}건 취소(삭제)했습니다.${protectedN > 0 ? `\n(검수완료·발행분 ${protectedN}건은 보호되어 제외)` : ""}`);
+      return NextResponse.json({ ok: true, cancelled: removed });
+    }
     if (/^(도움말|help|\?)$/i.test(text)) {
       await reply(
         "📖 수집 봇 사용법\n\n" +
@@ -142,6 +223,8 @@ export async function POST(req: Request) {
         "   → 코드모드 진입, 이후 코드 줄바꿈 전송\n\n" +
         "4️⃣ 종료: '종료' 또는 '끝'\n" +
         "   → 수집 중지(실수 방지)\n\n" +
+        "5️⃣ 취소: '취소'\n" +
+        "   → 직전 등록 묶음 삭제(검수대기·미발행만)\n\n" +
         "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송\n" +
         "💡 캡션에 'YYMMDD 매입처'를 직접 달면 그 장만 적용"
       );
@@ -188,27 +271,23 @@ export async function POST(req: Request) {
         const supplier = (ctxRow.supplier as string) ?? "";
         const productName = (ctxRow.code_product as string) ?? "";
         const expiry = (ctxRow.code_expiry as string) ?? "";
-        const now = new Date();
-        const ymd = purchaseDate ? String(purchaseDate).replaceAll("-", "").slice(2)
-          : `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-        const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
-        let batchId: string;
-        const { data: existing } = await sb.from("stock_batches").select("id").eq("batch_no", batchNo).maybeSingle();
-        if (existing?.id) batchId = existing.id;
-        else {
-          const { data: nb, error: be } = await sb.from("stock_batches")
-            .insert({ batch_no: batchNo, storage_type: "code", default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
-            .select("id").single();
-          if (be) throw new Error(be.message);
-          batchId = nb.id;
+        // 매입일 미설정 보류 — 돈 추적이 끊기지 않도록 등록 전 차단
+        if (!purchaseDate) {
+          await reply("⏸️ 등록 보류 — 먼저 매입일을 설정하세요.\n'YYMMDD 매입처' 한 줄을 보낸 뒤 코드를 다시 보내주세요. (예: 260623 당근)");
+          return NextResponse.json({ ok: true, held: "no-context" });
         }
+        const ymd = ymdOf(purchaseDate);
+        const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
+        const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate);
         const optName = await resolveOptionName(sb, productName);
-        const inserts = codes.map((code) => ({
+        const cleanCodes = codes.map((code) => code.replace(/\s+/g, ""));
+        const dupCount = await countDuplicateCodes(sb, cleanCodes);
+        const inserts = cleanCodes.map((code) => ({
           batch_id: batchId,
           image_path: "",
           product_name: productName,
           option_name: optName,
-          coupon_code: code.replace(/\s+/g, ""),
+          coupon_code: code,
           expiry_date: expiry || null,
           exchange_location: "",
           supplier,
@@ -218,11 +297,14 @@ export async function POST(req: Request) {
           inspection_status: "pending",
           stored_as_code: true,
         }));
-        const { error: ie } = await sb.from("stock_registrations").insert(inserts);
+        const { data: insRows, error: ie } = await sb.from("stock_registrations").insert(inserts).select("id");
         if (ie) throw new Error(ie.message);
+        await storeLastIds(sb, chatId, (insRows ?? []).map((r) => r.id as string));
         const displayName = productName.replace(/^\[비바콘\]\s*/, "");
-        await reply(`✅ ${codes.length}건 등록(검수대기): ${displayName}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""}${purchaseDate ? ` · ${purchaseDate}` : ""}\n\n추가 코드를 보내거나, 다른 상품은 '코드\\n상품명\\nYYMMDD', 종료는 '종료'.`);
-        return NextResponse.json({ ok: true, codes: codes.length });
+        const dupNote = dupCount > 0 ? `\n⚠️ 이 중 ${dupCount}건은 기존 재고와 코드 중복(검수 확인)` : "";
+        const expNote = expiryWarning(expiry);
+        await reply(`✅ ${codes.length}건 등록(검수대기): ${displayName}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""} · ${purchaseDate}${expNote}${dupNote}\n\n추가 코드를 보내거나, 다른 상품은 '코드\\n상품명\\nYYMMDD', 종료는 '종료', 직전 취소는 '취소'.`);
+        return NextResponse.json({ ok: true, codes: codes.length, dup: dupCount });
       }
     }
 
@@ -261,6 +343,12 @@ export async function POST(req: Request) {
       if (row) { purchaseDate = row.purchase_date as string | null; supplier = (row.supplier as string) ?? ""; }
     }
 
+    // 매입일 미설정 보류 — OCR/업로드 비용 쓰기 전에 차단(돈 추적 끊김 방지)
+    if (!purchaseDate) {
+      await reply("⏸️ 등록 보류 — 먼저 매입일을 설정하세요.\n'YYMMDD 매입처' 한 줄을 보내거나, 이미지 캡션에 직접 달아주세요. (예: 260623 당근)");
+      return NextResponse.json({ ok: true, held: "no-context" });
+    }
+
     // 파일 다운로드
     const gf = await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)).json();
     const filePath = gf?.result?.file_path;
@@ -269,21 +357,10 @@ export async function POST(req: Request) {
     const isPng = filePath.toLowerCase().endsWith(".png");
     const mime = isPng ? "image/png" : "image/jpeg";
 
-    // 배치 확보 (매입일+매입처 기준 TG-YYMMDD-매입처, 미설정 시 오늘)
-    const now = new Date();
-    const ymd = purchaseDate ? purchaseDate.replaceAll("-", "").slice(2)
-      : `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    // 배치 확보 (매입일+매입처 기준 TG-YYMMDD-매입처)
+    const ymd = ymdOf(purchaseDate);
     const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
-    let batchId: string;
-    const { data: existing } = await sb.from("stock_batches").select("id").eq("batch_no", batchNo).maybeSingle();
-    if (existing?.id) batchId = existing.id;
-    else {
-      const { data: nb, error: be } = await sb.from("stock_batches")
-        .insert({ batch_no: batchNo, storage_type: "code", default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
-        .select("id").single();
-      if (be) throw new Error(be.message);
-      batchId = nb.id;
-    }
+    const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate);
 
     // GCP 업로드
     const destPath = `${ymd}/${batchNo}/${crypto.randomUUID()}.${isPng ? "png" : "jpg"}`;
@@ -312,7 +389,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const { error: ie } = await sb.from("stock_registrations").insert({
+    const { data: insRow, error: ie } = await sb.from("stock_registrations").insert({
       batch_id: batchId,
       image_path: destPath,
       product_name: ocr.product_name,
@@ -326,13 +403,15 @@ export async function POST(req: Request) {
       ocr_raw: raw,
       inspection_status: "pending",
       stored_as_code: true,
-    });
+    }).select("id").single();
     if (ie) throw new Error(ie.message);
+    if (insRow?.id) await storeLastIds(sb, chatId, [insRow.id as string]);
 
     const codeMask = ocr.coupon_code ? ocr.coupon_code.slice(0, 2) + "***" : "(코드 미인식)";
-    const ctxNote = !purchaseDate && !supplier ? "\n⚠️ 매입일·매입처 미설정 — 먼저 'YYMMDD 매입처' 한 줄을 보내세요." : "";
+    const ctxNote = !supplier ? "\n⚠️ 매입처 미설정 — 'YYMMDD 매입처'로 설정 권장(증빙 추적)" : "";
     const ocrNote = ocrErr ? `\n⚠️ OCR 실패: ${ocrErr}` : (!ocr.product_name && !ocr.coupon_code ? "\n⚠️ OCR 인식 0건 — 검수에서 수동 입력하세요." : "");
-    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""}${purchaseDate ? ` · ${purchaseDate}` : ""}${ctxNote}${ocrNote}${dupNote}`);
+    const expNote = expiryWarning(ocr.expiry_date);
+    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""} · ${purchaseDate}${expNote}${ctxNote}${ocrNote}${dupNote}`);
     return NextResponse.json({ ok: true, batch: batchNo });
   } catch (e) {
     await reply("⚠️ 처리 실패: " + (e instanceof Error ? e.message : "오류"));
