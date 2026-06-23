@@ -475,7 +475,7 @@ export function VivaconStockPanel() {
             {/* 이미지 (클릭 → 라이트박스) */}
             <button type="button" onClick={() => { setLightbox(r.image_url); setScale(1); }} className="shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.image_url} alt="기프티콘" className="h-40 w-32 rounded-lg border border-border object-cover hover:opacity-80" />
+              <img src={r.image_url} alt="기프티콘" className="h-32 w-24 sm:h-40 sm:w-32 rounded-lg border border-border object-cover hover:opacity-80" />
             </button>
             {/* 필드 (Enter=저장) */}
             <div className="min-w-0 flex-1 space-y-1.5"
@@ -490,32 +490,32 @@ export function VivaconStockPanel() {
                   선택
                 </label>
                 {!r.published && (
-                  <button onClick={() => deleteRow(r)} title="삭제" className="text-muted-foreground hover:text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
+                  <button onClick={() => deleteRow(r)} title="삭제" className="p-2 -m-1 text-muted-foreground hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 )}
               </div>
-              <input list="vivacon-products" className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs" placeholder="상품명(비바콘 검색)"
+              <input list="vivacon-products" className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" placeholder="상품명(비바콘 검색)"
                 value={r.product_name} disabled={r.published}
                 onChange={(e) => { const v = e.target.value; updateRow(r.id, slugMap[v] ? { product_name: v, product_slug: slugMap[v] } : { product_name: v }); }} />
-              <input className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs" placeholder="옵션명"
+              <input className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" placeholder="옵션명"
                 value={r.option_name} disabled={r.published} onChange={(e) => updateRow(r.id, { option_name: e.target.value })} />
               {/* 영문명(슬러그) — 이미지형 파일명에 사용 */}
               <div className="flex gap-1.5">
-                <input className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs font-mono" placeholder="영문명(파일명용)"
+                <input className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm font-mono" placeholder="영문명(파일명용)"
                   value={r.product_slug ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { product_slug: e.target.value })} />
                 {!r.published && (
-                  <button onClick={() => genSlug(r)} title="AI 영문명 생성" className="flex shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-xs text-primary hover:bg-primary/10">
+                  <button onClick={() => genSlug(r)} title="AI 영문명 생성" className="flex shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-sm text-primary hover:bg-primary/10">
                     <Sparkles className="h-3 w-3" /> AI
                   </button>
                 )}
               </div>
-              <input className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs font-mono" placeholder="쿠폰번호"
+              <input className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm font-mono" placeholder="쿠폰번호"
                 value={r.coupon_code} disabled={r.published} onChange={(e) => updateRow(r.id, { coupon_code: e.target.value })} />
               <div className="flex gap-1.5">
-                <input type="date" className="rounded-md border border-border bg-background px-2 py-1 text-xs" title="유효기간"
+                <input type="date" className="rounded-md border border-border bg-background px-2 py-1.5 text-sm" title="유효기간"
                   value={r.expiry_date ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { expiry_date: e.target.value })} />
-                <select className="w-24 rounded-md border border-border bg-background px-1.5 py-1 text-xs" title="매입처"
+                <select className="w-24 rounded-md border border-border bg-background px-2 py-1.5 text-sm" title="매입처"
                   value={r.supplier ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { supplier: e.target.value })}>
                   <option value="">매입처</option>
                   {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
@@ -524,23 +524,23 @@ export function VivaconStockPanel() {
                   value={r.unit_cost ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9-]/g, "")) })} />
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <select className="rounded-md border border-border bg-background px-1.5 py-1 text-xs" disabled={r.published}
+                <select className="rounded-md border border-border bg-background px-2 py-1.5 text-sm" disabled={r.published}
                   value={r.stored_as_code ? "code" : "image"} onChange={(e) => updateRow(r.id, { stored_as_code: e.target.value === "code" })}>
                   <option value="code">코드형</option>
                   <option value="image">이미지형</option>
                 </select>
                 {!r.published && (
                   <>
-                    <button onClick={() => saveRow(r)} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-secondary">
-                      <Save className="h-3 w-3" /> 저장
+                    <button onClick={() => saveRow(r)} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 hover:bg-secondary">
+                      <Save className="h-4 w-4" /> 저장
                     </button>
                     {r.inspection_status === "approved" ? (
-                      <button onClick={() => setStatus(r, "pending")} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-amber-600">
-                        <RotateCcw className="h-3 w-3" /> 승인취소
+                      <button onClick={() => setStatus(r, "pending")} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-amber-600">
+                        <RotateCcw className="h-4 w-4" /> 승인취소
                       </button>
                     ) : (
-                      <button onClick={() => setStatus(r, "approved")} className="flex items-center gap-1 rounded-md bg-primary/10 border border-primary/30 px-2 py-1 text-primary">
-                        <CheckCircle2 className="h-3 w-3" /> 승인
+                      <button onClick={() => setStatus(r, "approved")} className="flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/30 px-3 py-2 text-primary">
+                        <CheckCircle2 className="h-4 w-4" /> 승인
                       </button>
                     )}
                   </>

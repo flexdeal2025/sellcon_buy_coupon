@@ -24,12 +24,12 @@ function parseCtx(s: string) {
 async function resolveVendor(
   sb: ReturnType<typeof getServerSupabase>,
   raw: string,
+  cachedVendors?: { name: string }[],
 ): Promise<{ name: string; matched: boolean; fuzzy: boolean }> {
   const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
   const n = norm(raw);
   if (!n) return { name: raw, matched: false, fuzzy: false };
-  const { data } = await sb.from("purchase_vendors").select("name");
-  const vendors = (data ?? []) as { name: string }[];
+  const vendors = cachedVendors ?? ((await sb.from("purchase_vendors").select("name")).data ?? []) as { name: string }[];
   const exact = vendors.find((v) => norm(v.name) === n);
   if (exact) return { name: exact.name, matched: true, fuzzy: false };
   const cont = vendors.filter((v) => { const vn = norm(v.name); return vn && (vn.includes(n) || n.includes(vn)); });
@@ -92,6 +92,20 @@ export async function POST(req: Request) {
       await reply("🔒 수집 종료. 이미지를 올려도 등록되지 않습니다.\n다시 시작하려면 'YYMMDD 매입처'를 보내세요.");
       return NextResponse.json({ ok: true, stopped: true });
     }
+    if (/^(도움말|help|\?)$/i.test(text)) {
+      await reply(
+        "📖 수집 봇 사용법\n\n" +
+        "1️⃣ 매입 설정: 'YYMMDD 매입처' (예: 260623 당근)\n" +
+        "   → 매입일·매입처가 설정됩니다.\n\n" +
+        "2️⃣ 이미지 전송: 설정 후 쿠폰 이미지를 올리면\n" +
+        "   → AI OCR → 검수대기로 자동 등록\n\n" +
+        "3️⃣ 종료: '종료' 또는 '끝'\n" +
+        "   → 수집 중지(실수 방지)\n\n" +
+        "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송\n" +
+        "💡 캡션에 'YYMMDD 매입처'를 직접 달면 그 장만 적용"
+      );
+      return NextResponse.json({ ok: true, help: true });
+    }
     const ctx = parseCtx(text);
     if (ctx.hasDate && chatId != null) {
       const v = await resolveVendor(sb, ctx.supplier);
@@ -107,11 +121,13 @@ export async function POST(req: Request) {
 
   // ── 이미지: 컨텍스트(캡션 우선 → 저장된 컨텍스트) 적용 ──
   try {
+    const { data: vendorRows } = await sb.from("purchase_vendors").select("name");
+    const vendorCache = (vendorRows ?? []) as { name: string }[];
     const cap = parseCtx((msg?.caption ?? "").trim());
     let purchaseDate: string | null = null;
     let supplier = "";
     if (cap.hasDate) {
-      const v = await resolveVendor(sb, cap.supplier);
+      const v = await resolveVendor(sb, cap.supplier, vendorCache);
       purchaseDate = cap.purchaseDate; supplier = v.name;
       if (chatId != null) await sb.from("telegram_ingest_context").upsert({
         chat_id: String(chatId), purchase_date: purchaseDate, supplier, updated_at: new Date().toISOString(),
@@ -130,11 +146,11 @@ export async function POST(req: Request) {
     const isPng = filePath.toLowerCase().endsWith(".png");
     const mime = isPng ? "image/png" : "image/jpeg";
 
-    // 배치 확보 (매입일 기준 TG-YYMMDD, 미설정 시 오늘)
+    // 배치 확보 (매입일+매입처 기준 TG-YYMMDD-매입처, 미설정 시 오늘)
     const now = new Date();
     const ymd = purchaseDate ? purchaseDate.replaceAll("-", "").slice(2)
       : `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-    const batchNo = `TG-${ymd}`;
+    const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
     let batchId: string;
     const { data: existing } = await sb.from("stock_batches").select("id").eq("batch_no", batchNo).maybeSingle();
     if (existing?.id) batchId = existing.id;
@@ -157,6 +173,22 @@ export async function POST(req: Request) {
     try { const r = await ocrGifticon(buf.toString("base64"), mime); ocr = r.result; raw = r.raw; }
     catch (e) { ocrErr = e instanceof Error ? e.message : "ocr failed"; raw = { ocr_error: ocrErr }; }
 
+    // 중복 감지: 동일 쿠폰번호가 스테이징 또는 비바콘 재고에 있으면 경고
+    let dupNote = "";
+    if (ocr.coupon_code) {
+      const { data: dupStg } = await sb.from("stock_registrations")
+        .select("id").eq("coupon_code", ocr.coupon_code).limit(1);
+      if (dupStg?.length) dupNote = "\n⚠️ 중복: 이미 스테이징에 동일 쿠폰번호 존재";
+      else {
+        try {
+          const { getVivaconSupabase } = await import("@/lib/supabase/vivacon");
+          const vc = getVivaconSupabase();
+          const { data: dupVc } = await vc.from("coupon_codes").select("id").eq("coupon_code", ocr.coupon_code).limit(1);
+          if (dupVc?.length) dupNote = "\n⚠️ 중복: 비바콘 재고에 동일 쿠폰번호 존재";
+        } catch { /* vivacon 미연결 시 무시 */ }
+      }
+    }
+
     const { error: ie } = await sb.from("stock_registrations").insert({
       batch_id: batchId,
       image_path: destPath,
@@ -177,7 +209,7 @@ export async function POST(req: Request) {
     const codeMask = ocr.coupon_code ? ocr.coupon_code.slice(0, 2) + "***" : "(코드 미인식)";
     const ctxNote = !purchaseDate && !supplier ? "\n⚠️ 매입일·매입처 미설정 — 먼저 'YYMMDD 매입처' 한 줄을 보내세요." : "";
     const ocrNote = ocrErr ? `\n⚠️ OCR 실패: ${ocrErr}` : (!ocr.product_name && !ocr.coupon_code ? "\n⚠️ OCR 인식 0건 — 검수에서 수동 입력하세요." : "");
-    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""}${purchaseDate ? ` · ${purchaseDate}` : ""}${ctxNote}${ocrNote}`);
+    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""}${purchaseDate ? ` · ${purchaseDate}` : ""}${ctxNote}${ocrNote}${dupNote}`);
     return NextResponse.json({ ok: true, batch: batchNo });
   } catch (e) {
     await reply("⚠️ 처리 실패: " + (e instanceof Error ? e.message : "오류"));
