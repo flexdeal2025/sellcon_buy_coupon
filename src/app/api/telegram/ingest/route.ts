@@ -84,9 +84,15 @@ export async function POST(req: Request) {
   const doc = msg?.document && (msg.document.mime_type ?? "").startsWith("image/") ? msg.document : null;
   const fileId = photo?.file_id || doc?.file_id;
 
-  // ── 텍스트만(이미지 없음): 매입 컨텍스트 설정 ──
+  // ── 텍스트만(이미지 없음): 종료 명령 또는 매입 컨텍스트 설정 ──
   if (!fileId) {
-    const ctx = parseCtx((msg?.text ?? "").trim());
+    const text = (msg?.text ?? "").trim();
+    if (/^(종료|끝|stop|end)$/i.test(text) && chatId != null) {
+      await sb.from("telegram_ingest_context").delete().eq("chat_id", String(chatId));
+      await reply("🔒 수집 종료. 이미지를 올려도 등록되지 않습니다.\n다시 시작하려면 'YYMMDD 매입처'를 보내세요.");
+      return NextResponse.json({ ok: true, stopped: true });
+    }
+    const ctx = parseCtx(text);
     if (ctx.hasDate && chatId != null) {
       const v = await resolveVendor(sb, ctx.supplier);
       await sb.from("telegram_ingest_context").upsert({
