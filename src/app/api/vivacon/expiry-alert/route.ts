@@ -63,17 +63,29 @@ export async function GET(req: Request) {
         // 미열람 건은 열람 URL 동봉 (이슈 사전대응용)
         return !r.first_accessed_at && u ? `${head}\n   ↳ ${u}` : head;
       };
-      const lines = [
-        `⏰ 유효기간 임박 미사용 쿠폰 (${minDays}~${maxDays}일 · 총 ${rows.length}건 / 미열람 ${unopened.length})`,
-        "",
-        ...[...rows].sort((a, b) => Number(!!a.first_accessed_at) - Number(!!b.first_accessed_at)).slice(0, 40).map(line),
-      ];
-      if (rows.length > 40) lines.push(`…외 ${rows.length - 40}건`);
-      // 평문 발송 + 전용 봇/채팅방 (미설정 시 기본 봇·채팅방 fallback)
+      const header = `⏰ 유효기간 임박 미사용 쿠폰 (${minDays}~${maxDays}일 · 총 ${rows.length}건 / 미열람 ${unopened.length})`;
+      const bodyLines = [...rows]
+        .sort((a, b) => Number(!!a.first_accessed_at) - Number(!!b.first_accessed_at))
+        .map(line);
+      // 텔레그램 4096자 한도 → 3500자 단위로 분할 발송
+      const chunks: string[] = [];
+      let cur = header;
+      for (const l of bodyLines) {
+        if ((cur + "\n" + l).length > 3500) { chunks.push(cur); cur = l; }
+        else cur += "\n" + l;
+      }
+      if (cur) chunks.push(cur);
+
       const chatId = process.env.TELEGRAM_EXPIRY_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
       const token = process.env.TELEGRAM_EXPIRY_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
-      telegram = await sendTelegramDirect(lines.join("\n"), { parseMode: null, chatId, token });
-      sent = telegram.ok;
+      let allOk = true; let lastDesc: string | undefined;
+      for (let i = 0; i < chunks.length; i++) {
+        const body = chunks.length > 1 ? `${chunks[i]}\n(${i + 1}/${chunks.length})` : chunks[i];
+        const r = await sendTelegramDirect(body, { parseMode: null, chatId, token });
+        if (!r.ok) { allOk = false; lastDesc = r.description; }
+      }
+      telegram = { ok: allOk, description: lastDesc };
+      sent = allOk;
     }
 
     return NextResponse.json({
