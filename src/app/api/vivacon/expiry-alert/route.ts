@@ -66,9 +66,10 @@ export async function GET(req: Request) {
         ...[...rows].sort((a, b) => Number(!!a.first_accessed_at) - Number(!!b.first_accessed_at)).slice(0, 40).map(line),
       ];
       if (rows.length > 40) lines.push(`…외 ${rows.length - 40}건`);
-      // 평문 발송 + 전용 채팅방(미설정 시 기본 채팅방 fallback)
+      // 평문 발송 + 전용 봇/채팅방 (미설정 시 기본 봇·채팅방 fallback)
       const chatId = process.env.TELEGRAM_EXPIRY_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
-      await sendTelegramDirect(lines.join("\n"), { parseMode: null, chatId });
+      const token = process.env.TELEGRAM_EXPIRY_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+      await sendTelegramDirect(lines.join("\n"), { parseMode: null, chatId, token });
       sent = true;
     }
 

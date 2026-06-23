@@ -4,9 +4,9 @@
  */
 export async function sendTelegramDirect(
   text: string,
-  opts?: { parseMode?: "Markdown" | "HTML" | null; chatId?: string },
+  opts?: { parseMode?: "Markdown" | "HTML" | null; chatId?: string; token?: string },
 ): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token = opts?.token || process.env.TELEGRAM_BOT_TOKEN;
   const chatId = opts?.chatId || process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) {
     console.info("[Telegram-Server] 환경변수 미설정, 건너뜀");
