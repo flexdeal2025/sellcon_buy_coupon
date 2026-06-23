@@ -52,6 +52,9 @@ export async function GET(req: Request) {
     const viewUrl = (r: Row) => r.coupon_public_url || (origin && r.링크_url ? `${origin}/coupon/${r.링크_url}` : (r.링크_url ?? ""));
 
     let sent = false;
+    let telegram: { ok: boolean; skipped?: boolean; description?: string } | null = null;
+    const usedExpiryBot = !!process.env.TELEGRAM_EXPIRY_BOT_TOKEN;
+    const usedExpiryChat = !!process.env.TELEGRAM_EXPIRY_CHAT_ID;
     if (notify && rows.length > 0) {
       const fmtExp = (y: string) => (y && y.length === 6 ? `20${y.slice(0, 2)}-${y.slice(2, 4)}-${y.slice(4, 6)}` : y);
       const line = (r: Row) => {
@@ -69,11 +72,14 @@ export async function GET(req: Request) {
       // 평문 발송 + 전용 봇/채팅방 (미설정 시 기본 봇·채팅방 fallback)
       const chatId = process.env.TELEGRAM_EXPIRY_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
       const token = process.env.TELEGRAM_EXPIRY_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
-      await sendTelegramDirect(lines.join("\n"), { parseMode: null, chatId, token });
-      sent = true;
+      telegram = await sendTelegramDirect(lines.join("\n"), { parseMode: null, chatId, token });
+      sent = telegram.ok;
     }
 
-    return NextResponse.json({ ok: true, minDays, maxDays, total: rows.length, unopened: unopened.length, sent });
+    return NextResponse.json({
+      ok: true, minDays, maxDays, total: rows.length, unopened: unopened.length, sent,
+      telegram, env: { expiryBotToken: usedExpiryBot, expiryChatId: usedExpiryChat },
+    });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "알림 실패" }, { status: 500 });
   }
