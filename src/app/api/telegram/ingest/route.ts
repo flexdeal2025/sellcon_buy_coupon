@@ -40,6 +40,8 @@ async function resolveVendor(
   return { name: raw, matched: false, fuzzy: false };
 }
 
+const DEFAULT_OPTION = "유효기간 최소 10일 이상 쿠폰 발송";
+
 // 상품명 부분일치 매칭 (smartstore_products 마스터, [비바콘] 제거 후 비교)
 async function resolveProduct(
   sb: ReturnType<typeof getServerSupabase>,
@@ -58,6 +60,20 @@ async function resolveProduct(
     return { name: cont[0].name, matched: true };
   }
   return { name: raw, matched: false };
+}
+
+// 상품명 → 옵션명 자동매핑 (product_option_map 부분일치, 미매칭 시 기본값)
+async function resolveOptionName(
+  sb: ReturnType<typeof getServerSupabase>,
+  productName: string,
+): Promise<string> {
+  const norm = (s: string) => s.replace(/^\[비바콘\]\s*/, "").replace(/\s+/g, "").toLowerCase();
+  const n = norm(productName);
+  if (!n) return DEFAULT_OPTION;
+  const { data } = await sb.from("product_option_map").select("product_match, option_name");
+  const maps = (data ?? []) as { product_match: string; option_name: string }[];
+  const hit = maps.find((m) => n.includes(norm(m.product_match)));
+  return hit?.option_name ?? DEFAULT_OPTION;
 }
 
 // 텔레그램 수집 봇 webhook
@@ -144,6 +160,7 @@ export async function POST(req: Request) {
       }
       const expDate = `20${expiryRaw.slice(0, 2)}-${expiryRaw.slice(2, 4)}-${expiryRaw.slice(4, 6)}`;
       const prod = await resolveProduct(sb, productRaw);
+      const optName = await resolveOptionName(sb, prod.name);
       const displayName = prod.matched ? prod.name.replace(/^\[비바콘\]\s*/, "") : productRaw;
       await sb.from("telegram_ingest_context").upsert({
         chat_id: String(chatId),
@@ -151,7 +168,8 @@ export async function POST(req: Request) {
         updated_at: new Date().toISOString(),
       });
       const matchTag = prod.matched ? "" : "\n⚠️ 상품 미매칭 — 검수에서 수정 가능";
-      await reply(`📋 코드 수집 모드: ${displayName} (~${expDate})${matchTag}\n코드를 줄바꿈으로 보내주세요. 완료 후 '종료' 또는 새 매입설정.`);
+      const optTag = optName !== DEFAULT_OPTION ? `\n옵션: ${optName}` : `\n옵션: ${DEFAULT_OPTION} (기본)`;
+      await reply(`📋 코드 수집 모드: ${displayName} (~${expDate})${optTag}${matchTag}\n코드를 줄바꿈으로 보내주세요. 완료 후 '종료' 또는 새 매입설정.`);
       return NextResponse.json({ ok: true, codeMode: true });
     }
 
@@ -184,10 +202,12 @@ export async function POST(req: Request) {
           if (be) throw new Error(be.message);
           batchId = nb.id;
         }
+        const optName = await resolveOptionName(sb, productName);
         const inserts = codes.map((code) => ({
           batch_id: batchId,
           image_path: "",
           product_name: productName,
+          option_name: optName,
           coupon_code: code.replace(/\s+/g, ""),
           expiry_date: expiry || null,
           exchange_location: "",
