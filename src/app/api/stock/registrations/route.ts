@@ -39,11 +39,22 @@ export async function GET(req: Request) {
       for (const p of pub ?? []) pubSet.add(p.coupon_code);
     }
 
+    // product_slug 미입력 행 → 마스터 영문명(vivacon_product_slugs)으로 보충(표시용; 발행 시 확정)
+    const strip = (n: string) => String(n ?? "").replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim();
+    const needPn = Array.from(new Set((data ?? []).filter((r) => !r.product_slug && r.product_name).map((r) => strip(r.product_name))));
+    const masterSlug = new Map<string, string>();
+    if (needPn.length) {
+      const { data: ms } = await sb.from("vivacon_product_slugs").select("product_name, slug").in("product_name", needPn);
+      for (const m of ms ?? []) masterSlug.set(m.product_name, (m.slug as string) ?? "");
+    }
+
     const rows = await Promise.all(
       (data ?? []).map(async (r) => ({
         ...r,
         // image_path(GCP) 우선, 없으면 셀콘 원본 공개 URL 폴백(이미지형 직결 건은 GCP 미적재 상태)
         image_url: r.image_path ? await getSignedReadUrl(OCR_BUCKET, r.image_path) : (r.source_image_url || ""),
+        // 영문명 미입력 시 마스터 영문명으로 채워 표시
+        product_slug: r.product_slug || masterSlug.get(strip(r.product_name)) || "",
         // 미발행 건이 이미 어딘가에 있으면 중복
         dup: !!r.coupon_code && !r.published && (dupSet.has(r.coupon_code) || pubSet.has(r.coupon_code)),
       })),

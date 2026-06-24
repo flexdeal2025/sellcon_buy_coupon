@@ -107,12 +107,17 @@ export async function POST(req: Request) {
           r.image_path = matPath;
         }
         if (!r.image_path) throw new Error("이미지 경로 없음(원본 URL도 없음) — 검수에서 이미지 확인 필요");
-        // 영문 슬러그: 저장값 우선, 없으면 AI 생성
+        // 영문 슬러그: ① 저장값 → ② 마스터(vivacon_product_slugs) 상품명 매칭 → ③ AI → ④ item
         let slug = sanitizeSlug(String(r.product_slug ?? ""));
-        if (!slug) {
-          try { slug = await slugifyProductName(r.product_name); } catch { slug = "item"; }
-          if (!slug) slug = "item";
+        if (!slug && r.product_name) {
+          const pn = String(r.product_name).replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim();
+          const { data: ms } = await sb.from("vivacon_product_slugs").select("slug").eq("product_name", pn).maybeSingle();
+          if (ms?.slug) slug = sanitizeSlug(String(ms.slug));
         }
+        if (!slug) {
+          try { slug = await slugifyProductName(r.product_name); } catch { slug = ""; }
+        }
+        if (!slug) slug = "item";
         const ext = (String(r.image_path).split(".").pop() ?? "jpg").toLowerCase();
         // 영문매입처명 (마스터에서, 없으면 매입처명 슬러그화)
         const vEn = sanitizeSlug(vendorEn.get(r.supplier ?? "") || String(r.supplier ?? "")) || "etc";
