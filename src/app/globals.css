@@ -107,7 +107,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: var(--font-pretendard), system-ui, sans-serif;
+  --font-sans: var(--font-app), system-ui, sans-serif;
 }
 
 * {

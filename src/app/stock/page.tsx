@@ -4,9 +4,10 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { VivaconStockPanel } from "@/components/vivacon-stock-panel";
 import { StockHistoryPanel } from "@/components/stock-history-panel";
-import { Upload, History } from "lucide-react";
+import { GifticonConvertPanel } from "@/components/gifticon-convert-panel";
+import { Upload, History, Wand2 } from "lucide-react";
 
-type Tab = "register" | "history";
+type Tab = "register" | "history" | "convert";
 
 export default function StockPage() {
   const [tab, setTab] = useState<Tab>("register");
@@ -21,7 +22,7 @@ export default function StockPage() {
 
       {/* 탭 */}
       <div className="flex rounded-xl bg-secondary p-1">
-        {([["register", "재고 등록", Upload], ["history", "재고 이력", History]] as const).map(([k, label, Icon]) => (
+        {([["register", "재고 등록", Upload], ["convert", "기프티콘 변환", Wand2], ["history", "재고 이력", History]] as const).map(([k, label, Icon]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -36,7 +37,7 @@ export default function StockPage() {
         ))}
       </div>
 
-      {tab === "register" ? <VivaconStockPanel /> : <StockHistoryPanel />}
+      {tab === "register" ? <VivaconStockPanel /> : tab === "convert" ? <GifticonConvertPanel /> : <StockHistoryPanel />}
     </div>
   );
 }
