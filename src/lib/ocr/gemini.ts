@@ -80,16 +80,25 @@ export function sanitizeSlug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
 }
 
-/** 한국어 상품명 → 짧은 영문 슬러그 (파일명용). 예: "CGV 2D 관람권" → "cgv_2d" */
+/**
+ * 한국어 상품명 → 영문 슬러그 (파일명·식별용). 슬러그만 보고 상품을 추정 가능하게.
+ * 구성: 브랜드[_금액/규격][_유형]  예: "메가MGC커피 1만원권 잔액관리형" → "megacoffee_1man_bal"
+ */
 export async function slugifyProductName(name: string): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY 미설정");
   const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
-  const prompt = `다음 한국어 상품명을 짧은 영문 슬러그로 변환하라. 규칙: 소문자, 단어 구분은 underscore(_), 영문/숫자만, 브랜드·핵심어 위주로 간결하게.
+  const prompt = `다음 한국어 상품명을 영문 슬러그로 변환하라. 목적: 슬러그만 보고 어떤 상품인지 추정 가능해야 함.
+규칙: 소문자, 단어 구분 underscore(_), 영문/숫자만, 40자 이내. 구성 = 브랜드[_금액/규격][_유형]
+- 브랜드: 핵심 브랜드 영문 (메가MGC커피→megacoffee, 메가박스→megabox, CGV→cgv, 스타벅스→starbucks, GS25→gs25)
+- 금액권: 만원→nman / 천원→ncheon (1만원→1man, 3만원→3man, 5천원→5cheon)
+- 규격: 인원·사이즈·포맷 (2인→2in, 톨→tall, 2D→2d)
+- 유형(구분 필요시만): 잔액관리형→bal, 교환형→exc, 금액형→amt
 JSON {"slug":"..."} 형식으로만 답하라.
+예: "메가MGC커피 1만원권 잔액관리형" -> {"slug":"megacoffee_1man_bal"}
 예: "CGV 2D 관람권" -> {"slug":"cgv_2d"}
-예: "메가박스 일반관람권" -> {"slug":"megabox"}
-예: "스타벅스 아메리카노 T" -> {"slug":"starbucks_americano"}
+예: "GS25 모바일상품권 3만원" -> {"slug":"gs25_3man"}
+예: "스타벅스 아메리카노 T" -> {"slug":"starbucks_americano_tall"}
 상품명: ${name}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;

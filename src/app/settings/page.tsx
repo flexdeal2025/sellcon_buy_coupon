@@ -6,14 +6,16 @@ import { PhoneLinesPanel } from "@/components/phone-lines-panel";
 import { PresetsPanel } from "@/components/presets-panel";
 import { SupplierAccountsPanel } from "@/components/supplier-accounts-panel";
 import { PurchaseVendorsPanel } from "@/components/purchase-vendors-panel";
-import { Phone, Star, KeyRound, Store } from "lucide-react";
+import { SlugMasterPanel } from "@/components/slug-master-panel";
+import { Phone, Star, KeyRound, Store, Type } from "lucide-react";
 
-type Tab = "lines" | "accounts" | "vendors" | "presets";
+type Tab = "lines" | "accounts" | "vendors" | "presets" | "slugs";
 
 const TABS: { key: Tab; label: string; icon: typeof Phone }[] = [
   { key: "lines",    label: "회선",     icon: Phone },
   { key: "accounts", label: "계정정보",  icon: KeyRound },
   { key: "vendors",  label: "매입처",   icon: Store },
+  { key: "slugs",    label: "영문명",   icon: Type },
   { key: "presets",  label: "프리셋",   icon: Star },
 ];
 
@@ -46,6 +48,7 @@ export default function SettingsPage() {
       {tab === "lines"    && <PhoneLinesPanel />}
       {tab === "accounts" && <SupplierAccountsPanel />}
       {tab === "vendors"  && <PurchaseVendorsPanel />}
+      {tab === "slugs"    && <SlugMasterPanel />}
       {tab === "presets"  && <PresetsPanel />}
     </div>
   );
