@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { cn } from "@/lib/utils";
+import { cn, toKST } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2, Trash2 } from "lucide-react";
@@ -170,7 +170,7 @@ export function VivaconProofPanel() {
 
   // 등록일 날짜 필터 (표시 등록일과 동일하게 클라이언트에서 — TZ 오차 회피)
   const displayedInventory = dateFilter
-    ? inventory.filter((r) => (r.created_at ?? "").slice(0, 10) === dateFilter)
+    ? inventory.filter((r) => toKST(r.created_at, true) === dateFilter)
     : inventory;
   const total = displayedInventory.length;
   const mapped = displayedInventory.filter((r) => r.proof_id).length;
@@ -335,7 +335,7 @@ export function VivaconProofPanel() {
                     <td className="px-2 py-1.5 truncate max-w-32" title={r.product_name}>{r.product_name}{r.option_name && ` (${r.option_name})`}</td>
                     <td className="px-2 py-1.5 font-mono truncate max-w-28" title={r.coupon_code}>{r.coupon_code}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{r.expiry_date ?? "-"}</td>
-                    <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.purchase_date ? `매입일 ${r.purchase_date}` : undefined}>{(r.created_at ?? "").slice(0, 10) || "-"}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.purchase_date ? `매입일 ${r.purchase_date}` : undefined}>{toKST(r.created_at, true) || "-"}</td>
                     <td className="px-2 py-1.5 text-center">
                       {r.proof_id ? (
                         <button onClick={() => unlink(r.id)} title="연결 해제" className="inline-flex items-center gap-0.5 text-green-600 hover:text-destructive">

@@ -4,6 +4,14 @@ import { getServerSupabase } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+// timestamptz(UTC) → KST 날짜(YYYY-MM-DD). 서버(UTC) 기준 slice 대신 KST 기준으로 그룹핑.
+function kstDate(iso: string | null): string {
+  if (!iso) return "(미지정)";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "(미지정)";
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 // 증빙 누락 리포트: 매입처 × 매입일별 재고 총건 / 증빙연결 / 미연결 집계
 export async function GET() {
   try {
@@ -22,7 +30,7 @@ export async function GET() {
     const map = new Map<string, Agg>();
     for (const r of regs ?? []) {
       const supplier = r.supplier || "(미지정)";
-      const date = (r.created_at ?? "").slice(0, 10) || "(미지정)";
+      const date = kstDate(r.created_at);
       const cost = Number(r.unit_cost) || 0;
       const key = `${supplier}__${date}`;
       const cur = map.get(key) ?? { supplier, date, total: 0, mapped: 0, totalAmt: 0, missingAmt: 0 };

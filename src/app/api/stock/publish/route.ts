@@ -3,6 +3,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
 import { copyOcrToPending, uploadOcrImage } from "@/lib/gcp/storage";
 import { slugifyProductName, sanitizeSlug } from "@/lib/ocr/gemini";
+import { resolveOptionName } from "@/lib/option-map";
 
 const yy = (d: string) => d.slice(2, 4) + d.slice(5, 7) + d.slice(8, 10);
 const todayYY = () => { const n = new Date(); const p = (x: number) => String(x).padStart(2, "0"); return p(n.getFullYear() % 100) + p(n.getMonth() + 1) + p(n.getDate()); };
@@ -78,11 +79,13 @@ export async function POST(req: Request) {
         const { data: existing } = await vc.from("coupon_codes").select("id").eq("coupon_code", r.coupon_code).limit(1);
         if (existing && existing.length > 0) throw new Error("이미 비바콘 재고에 있는 쿠폰번호(중복)");
         const yymmdd = r.expiry_date ? String(r.expiry_date).slice(2, 4) + String(r.expiry_date).slice(5, 7) + String(r.expiry_date).slice(8, 10) : null;
+        // 옵션명 안전장치: 비어 있으면(이미지로 올린 뒤 코드형 전환 등) product_option_map 자동 보완 → 알림톡 발송 필수값 보장
+        const optName = (r.option_name && String(r.option_name).trim()) ? String(r.option_name) : await resolveOptionName(sb, r.product_name ?? "");
         const { data: ins, error: e2 } = await vc
           .from("coupon_codes")
           .insert({
             상품명: r.product_name ?? "",
-            옵션명: r.option_name ?? "",
+            옵션명: optName,
             coupon_code: r.coupon_code,
             expiry_date: r.expiry_date ?? null,
             expiry_yymmdd: yymmdd,

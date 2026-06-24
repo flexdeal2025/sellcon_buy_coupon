@@ -13,6 +13,7 @@ export async function GET(req: Request) {
     const sb = getVivaconSupabase();
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") ?? "").trim();
+    const code = (url.searchParams.get("code") ?? "").trim();
     const status = (url.searchParams.get("status") ?? "").trim();
     const page = Math.max(0, Number(url.searchParams.get("page") ?? 0));
     const pageSize = Math.min(500, Math.max(1, Number(url.searchParams.get("pageSize") ?? 50)));
@@ -28,6 +29,7 @@ export async function GET(req: Request) {
       .order("id", { ascending: true })
       .range(page * pageSize, (page + 1) * pageSize - 1);
     if (q) query = query.ilike("상품명", `%${q}%`);
+    if (code) query = query.ilike("coupon_code", `%${code}%`);
     if (status) query = query.eq("status", status);
 
     const { data, count, error } = await query;
@@ -39,6 +41,7 @@ export async function GET(req: Request) {
       COUPON_STATUSES.map(async (s) => {
         let cq = sb.from("coupon_codes").select("id", { count: "exact", head: true }).eq("status", s);
         if (q) cq = cq.ilike("상품명", `%${q}%`);
+        if (code) cq = cq.ilike("coupon_code", `%${code}%`);
         const { count: c } = await cq;
         summary[s] = c ?? 0;
       }),

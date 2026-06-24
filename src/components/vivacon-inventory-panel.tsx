@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { cn } from "@/lib/utils";
+import { cn, toKST } from "@/lib/utils";
 import { toast } from "sonner";
 import { RefreshCw, Search, Pencil, X, Save } from "lucide-react";
 
@@ -58,12 +58,9 @@ type SortKey = "created_at" | "expiry_date" | "allocated_at";
 // 일괄수정 대상: 수정 가능 + 쿠폰번호(고유값) 제외
 const BULK_FIELDS = COLS.filter((c) => c.editable && c.key !== "coupon_code");
 
+// 등록시간·배정시간은 KST(UTC+9) 고정 표시 — 브라우저 타임존 무관
 function fmtDateTime(v: string | null): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return v;
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return v ? (toKST(v) || v) : "—";
 }
 
 export function VivaconInventoryPanel() {
@@ -74,6 +71,8 @@ export function VivaconInventoryPanel() {
 
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [codeQ, setCodeQ] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
@@ -114,7 +113,7 @@ export function VivaconInventoryPanel() {
     setSelected(new Set());
     try {
       const params = new URLSearchParams({
-        q, status, page: String(page), pageSize: String(pageSize),
+        q, code: codeQ, status, page: String(page), pageSize: String(pageSize),
         sort: sortKey, dir: sortAsc ? "asc" : "desc",
       });
       const res = await fetch(`/api/vivacon/inventory?${params}`);
@@ -126,9 +125,9 @@ export function VivaconInventoryPanel() {
     } finally {
       setLoading(false);
     }
-  }, [q, status, page, pageSize, sortKey, sortAsc]);
+  }, [q, codeQ, status, page, pageSize, sortKey, sortAsc]);
 
-  useEffect(() => { setPage(0); }, [q, status, pageSize, sortKey, sortAsc]);
+  useEffect(() => { setPage(0); }, [q, codeQ, status, pageSize, sortKey, sortAsc]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc((a) => !a);
@@ -261,14 +260,17 @@ export function VivaconInventoryPanel() {
           <Search className="h-3.5 w-3.5 text-muted-foreground" />
           <input className="bg-transparent py-1.5 text-sm outline-none" placeholder="상품명 검색..."
             value={qInput} onChange={(e) => setQInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && setQ(qInput.trim())} />
+            onKeyDown={(e) => { if (e.key === "Enter") { setQ(qInput.trim()); setCodeQ(codeInput.trim()); } }} />
         </div>
+        <input className="w-44 rounded-lg border border-border bg-background px-2 py-1.5 text-sm font-mono" placeholder="쿠폰번호 검색..."
+          value={codeInput} onChange={(e) => setCodeInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { setQ(qInput.trim()); setCodeQ(codeInput.trim()); } }} />
         <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
           value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">전체 상태</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <button onClick={() => setQ(qInput.trim())}
+        <button onClick={() => { setQ(qInput.trim()); setCodeQ(codeInput.trim()); }}
           className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">검색</button>
         <button onClick={fetchRows}
           className="ml-auto rounded-lg border border-border bg-background px-2 py-1.5 text-sm hover:bg-secondary">
