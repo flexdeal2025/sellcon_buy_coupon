@@ -36,7 +36,7 @@ interface Reg {
 const QUALITY_COLOR: Record<string, string> = {
   high: "text-green-600", medium: "text-amber-600", low: "text-red-500",
 };
-type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier" | "unit_cost";
+type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier" | "unit_cost" | "stored_as_code";
 interface Vendor { name: string; name_en: string }
 
 export function VivaconStockPanel() {
@@ -335,17 +335,44 @@ export function VivaconStockPanel() {
     if (targets.length === 0) { toast.error("미발행 카드를 선택하세요"); return; }
     if (bulkField === "expiry_date" && bulkValue && !/^\d{4}-\d{2}-\d{2}$/.test(bulkValue)) { toast.error("유효기간 형식 YYYY-MM-DD"); return; }
     if (bulkField === "unit_cost" && bulkValue.trim() && !/^[\d,]+$/.test(bulkValue.trim())) { toast.error("매입원가는 숫자만 입력하세요"); return; }
+    // 발행형태(boolean)는 code/image → stored_as_code 로 변환
+    const patch: Record<string, unknown> = bulkField === "stored_as_code"
+      ? { stored_as_code: bulkValue === "code" }
+      : { [bulkField]: bulkValue };
     setBusy(true);
     try {
       for (const r of targets) {
         const res = await fetch("/api/stock/registration", {
           method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
-          body: JSON.stringify({ id: r.id, patch: { [bulkField]: bulkValue } }),
+          body: JSON.stringify({ id: r.id, patch }),
         });
         const json = await res.json();
         if (json.ok) updateRow(r.id, json.row);
       }
-      toast.success(`${targets.length}건 일괄 변경 완료`);
+      const label = bulkField === "stored_as_code" ? (bulkValue === "code" ? "코드형" : "이미지형") + "으로 " : "";
+      toast.success(`${targets.length}건 ${label}일괄 변경 완료`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 선택 카드 옵션명 자동채움 — 상품명 기준(미매칭 시 기본 옵션). 빈 값만 채움(수기값 보존).
+  const autoFillOptions = async () => {
+    const targets = rows.filter((r) => selected.has(r.id) && !r.published);
+    if (targets.length === 0) { toast.error("미발행 카드를 선택하세요"); return; }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/stock/option-name", {
+        method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+        body: JSON.stringify({ ids: targets.map((r) => r.id) }),
+      });
+      const json = await res.json();
+      if (!json.ok) { toast.error("자동채움 실패: " + (json.error ?? "")); return; }
+      for (const u of (json.updated ?? []) as { id: string; option_name: string }[]) {
+        updateRow(u.id, { option_name: u.option_name });
+      }
+      const kept = targets.length - (json.count ?? 0);
+      toast.success(`옵션명 ${json.count ?? 0}건 자동채움${kept > 0 ? ` · 기존값 ${kept}건 유지` : ""}`);
     } finally {
       setBusy(false);
     }
@@ -511,14 +538,20 @@ export function VivaconStockPanel() {
           {selected.size > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-muted-foreground text-sm">|</span>
-              <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkField} onChange={(e) => { setBulkField(e.target.value as BulkField); setBulkValue(""); }}>
+              <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkField} onChange={(e) => { const f = e.target.value as BulkField; setBulkField(f); setBulkValue(f === "stored_as_code" ? "code" : ""); }}>
                 <option value="product_name">상품명</option>
                 <option value="option_name">옵션명</option>
                 <option value="expiry_date">유효기간</option>
                 <option value="supplier">매입처</option>
                 <option value="unit_cost">매입원가</option>
+                <option value="stored_as_code">발행형태</option>
               </select>
-              {bulkField === "expiry_date" ? (
+              {bulkField === "stored_as_code" ? (
+                <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}>
+                  <option value="code">코드형</option>
+                  <option value="image">이미지형</option>
+                </select>
+              ) : bulkField === "expiry_date" ? (
                 <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
               ) : bulkField === "supplier" ? (
                 <select className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}>
@@ -532,6 +565,11 @@ export function VivaconStockPanel() {
               )}
               <button onClick={applyBulk} disabled={busy} className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary disabled:opacity-50">일괄변경</button>
             </div>
+          )}
+          {selected.size > 0 && (
+            <button onClick={autoFillOptions} disabled={busy} title="선택 카드의 빈 옵션명을 상품명 기준으로 채웁니다" className="flex items-center gap-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
+              <Sparkles className="h-4 w-4" /> 옵션명 자동채움
+            </button>
           )}
           {selected.size > 0 && (
             <button onClick={approveSelected} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/20 disabled:opacity-50">
