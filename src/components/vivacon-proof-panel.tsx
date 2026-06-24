@@ -37,14 +37,20 @@ export function VivaconProofPanel() {
   const [amount, setAmount] = useState("");
 
   // 누락 리포트
-  interface ReportRow { supplier: string; date: string; total: number; mapped: number; missing: number }
+  interface ReportRow { supplier: string; date: string; total: number; mapped: number; missing: number; totalAmt: number; missingAmt: number }
   const [report, setReport] = useState<ReportRow[]>([]);
+  const [reportMissingAmt, setReportMissingAmt] = useState(0);
+  const [reportMissingCnt, setReportMissingCnt] = useState(0);
   const [showReport, setShowReport] = useState(false);
   const loadReport = async () => {
     const res = await fetch("/api/proof/report");
     const json = await res.json();
-    if (json.ok) { setReport(json.rows); setShowReport(true); }
-    else toast.error("리포트 실패: " + json.error);
+    if (json.ok) {
+      setReport(json.rows);
+      setReportMissingAmt(json.missingAmtTotal ?? 0);
+      setReportMissingCnt(json.missingCntTotal ?? 0);
+      setShowReport(true);
+    } else toast.error("리포트 실패: " + json.error);
   };
 
   useEffect(() => {
@@ -198,6 +204,12 @@ export function VivaconProofPanel() {
             <span className="text-sm font-medium">증빙 누락 리포트 (매입처 × 등록일) · 행 클릭 시 해당 조건으로 필터</span>
             <button onClick={() => setShowReport(false)} className="text-xs text-muted-foreground hover:text-foreground">닫기</button>
           </div>
+          {reportMissingCnt > 0 && (
+            <div className="border-b border-border bg-amber-50/60 px-3 py-1.5 text-xs dark:bg-amber-950/20">
+              증빙 없는 매입 <strong className="text-amber-700 dark:text-amber-500">{reportMissingCnt}건</strong> · 합계 <strong className="text-amber-700 dark:text-amber-500">{reportMissingAmt.toLocaleString()}원</strong>
+              <span className="ml-1 text-muted-foreground">(입력된 매입원가 기준 — 국세청 소명 리스크 금액)</span>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="border-b border-border bg-secondary/30">
@@ -207,10 +219,11 @@ export function VivaconProofPanel() {
                   <th className="px-3 py-1.5 text-right">전체</th>
                   <th className="px-3 py-1.5 text-right">연결</th>
                   <th className="px-3 py-1.5 text-right">미연결</th>
+                  <th className="px-3 py-1.5 text-right">미연결금액</th>
                 </tr>
               </thead>
               <tbody>
-                {report.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
+                {report.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
                 {report.map((r) => {
                   const validDate = /^\d{4}-\d{2}-\d{2}$/.test(r.date);
                   const applyFilter = () => {
@@ -227,6 +240,7 @@ export function VivaconProofPanel() {
                     <td className="px-3 py-1.5 text-right tabular-nums">{r.total}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-green-600">{r.mapped}</td>
                     <td className={cn("px-3 py-1.5 text-right tabular-nums font-medium", r.missing > 0 ? "text-amber-600" : "text-muted-foreground")}>{r.missing}</td>
+                    <td className={cn("px-3 py-1.5 text-right tabular-nums", r.missingAmt > 0 ? "font-medium text-amber-600" : "text-muted-foreground")}>{r.missingAmt > 0 ? r.missingAmt.toLocaleString() : "-"}</td>
                   </tr>
                   );
                 })}
