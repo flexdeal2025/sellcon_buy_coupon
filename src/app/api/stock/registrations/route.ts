@@ -42,7 +42,8 @@ export async function GET(req: Request) {
     const rows = await Promise.all(
       (data ?? []).map(async (r) => ({
         ...r,
-        image_url: r.image_path ? await getSignedReadUrl(OCR_BUCKET, r.image_path) : "",
+        // image_path(GCP) 우선, 없으면 셀콘 원본 공개 URL 폴백(이미지형 직결 건은 GCP 미적재 상태)
+        image_url: r.image_path ? await getSignedReadUrl(OCR_BUCKET, r.image_path) : (r.source_image_url || ""),
         // 미발행 건이 이미 어딘가에 있으면 중복
         dup: !!r.coupon_code && !r.published && (dupSet.has(r.coupon_code) || pubSet.has(r.coupon_code)),
       })),
