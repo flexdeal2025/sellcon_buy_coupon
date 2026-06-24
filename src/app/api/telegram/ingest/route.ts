@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { uploadOcrImage } from "@/lib/gcp/storage";
 import { ocrGifticon } from "@/lib/ocr/gemini";
+import { resolveOptionName, DEFAULT_OPTION } from "@/lib/option-map";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -40,8 +41,6 @@ async function resolveVendor(
   return { name: raw, matched: false, fuzzy: false };
 }
 
-const DEFAULT_OPTION = "유효기간 최소 10일 이상 쿠폰 발송";
-
 // 상품명 부분일치 매칭 (smartstore_products 마스터, [비바콘] 제거 후 비교)
 async function resolveProduct(
   sb: ReturnType<typeof getServerSupabase>,
@@ -60,20 +59,6 @@ async function resolveProduct(
     return { name: cont[0].name, matched: true };
   }
   return { name: raw, matched: false };
-}
-
-// 상품명 → 옵션명 자동매핑 (product_option_map 부분일치, 미매칭 시 기본값)
-async function resolveOptionName(
-  sb: ReturnType<typeof getServerSupabase>,
-  productName: string,
-): Promise<string> {
-  const norm = (s: string) => s.replace(/^\[비바콘\]\s*/, "").replace(/\s+/g, "").toLowerCase();
-  const n = norm(productName);
-  if (!n) return DEFAULT_OPTION;
-  const { data } = await sb.from("product_option_map").select("product_match, option_name");
-  const maps = (data ?? []) as { product_match: string; option_name: string }[];
-  const hit = maps.find((m) => n.includes(norm(m.product_match)));
-  return hit?.option_name ?? DEFAULT_OPTION;
 }
 
 // YYMMDD 문자열 (매입일 우선, 없으면 오늘) — 배치명·경로 공통
