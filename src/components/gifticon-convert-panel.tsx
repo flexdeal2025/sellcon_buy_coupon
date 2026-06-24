@@ -9,7 +9,8 @@ import { Upload, Loader2, ImageIcon, Sparkles } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
-const FONT = "'Malgun Gothic','Apple SD Gothic Neo','Nanum Gothic','Noto Sans KR',sans-serif";
+// 앱과 동일 폰트(Pretendard, layout.tsx에서 CDN 로드) → 캔버스도 동일 글꼴
+const FONT = "'Pretendard Variable', Pretendard, system-ui, sans-serif";
 
 // 기본 좌표 — 약 800×1400 템플릿(상단 상품박스 + '상품명' 라벨 + 바코드박스 + '유효기간' 라벨) 기준.
 // 라벨('상품명'·'유효기간')은 템플릿에 인쇄돼 있고, 실제 값은 라벨 오른쪽에 렌더된다.
@@ -18,7 +19,7 @@ const DEFAULT_COORDS = {
   prodX: 40, prodY: 40, prodSize: 720,
   nameX: 230, nameY: 818, nameFont: 34, nameMaxW: 520,
   bcX: 80, bcY: 962, bcW: 640, bcH: 210, bcFont: 22,
-  expX: 230, expY: 1258, expFont: 34,
+  expX: 230, expY: 1255, expFont: 40,
 };
 type Coords = typeof DEFAULT_COORDS;
 
@@ -142,6 +143,7 @@ export function GifticonConvertPanel() {
     const list = items.length ? items : parseList(listText);
     if (list.length === 0) { toast.error("입력 데이터가 없습니다"); return; }
     try {
+      try { await document.fonts.ready; } catch { /* 폰트 미로드 시 폴백 */ }
       const blob = await generateOne(list[0]);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(blob));
@@ -157,6 +159,7 @@ export function GifticonConvertPanel() {
     setBusy(true);
     setProgress({ done: 0, total: list.length });
     try {
+      try { await document.fonts.ready; } catch { /* 폰트 미로드 시 폴백 */ }
       // 배치 생성(이미지형)
       const br = await fetch("/api/stock/batch", {
         method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
