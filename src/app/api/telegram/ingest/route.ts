@@ -228,7 +228,8 @@ export async function POST(req: Request) {
       await reply("🔢 코드형 선택됨.\n다음: 'YYMMDD 매입처'를 보낸 뒤, '코드\\n상품명\\nYYMMDD'로 코드를 등록하세요.\n→ 코드형 재고로 등록됩니다.");
       return NextResponse.json({ ok: true, mode: "code" });
     }
-    if (/^(도움말|help|\?)$/i.test(text)) {
+    // 도움말: /help · /start · 도움말 · help · ? (그룹의 /help@봇이름 형태도 허용)
+    if (/^(\/(help|start)(@\w+)?|도움말|help|\?)$/i.test(text)) {
       await reply(
         "📖 수집 봇 사용법 (순서대로)\n\n" +
         "1️⃣ 저장형식 선택: '이미지형' 또는 '코드형'\n\n" +
@@ -238,7 +239,8 @@ export async function POST(req: Request) {
         "   • 코드형 → '코드\\n상품명(부분 OK)\\n유효기간(YYMMDD)' 보낸 뒤 코드 줄바꿈 전송\n\n" +
         "🔚 종료: '종료'/'끝' · ↩️ 취소: '취소'(직전 묶음 삭제)\n" +
         "💡 형식을 바꾸려면 '이미지형'/'코드형' 다시 전송\n" +
-        "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송"
+        "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송\n" +
+        "💡 이 도움말 다시 보기: /help"
       );
       return NextResponse.json({ ok: true, help: true });
     }
