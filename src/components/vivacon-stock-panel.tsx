@@ -288,6 +288,26 @@ export function VivaconStockPanel() {
     }
   };
 
+  // 선택 카드 일괄 승인 — 미발행·미승인 건만 approved 로 전환
+  const approveSelected = async () => {
+    const targets = rows.filter((r) => selected.has(r.id) && !r.published && r.inspection_status !== "approved");
+    if (targets.length === 0) { toast.error("승인할 미승인 카드를 선택하세요"); return; }
+    setBusy(true);
+    try {
+      let ok = 0;
+      for (const r of targets) {
+        const res = await fetch("/api/stock/registration", {
+          method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ id: r.id, patch: { inspection_status: "approved" } }),
+        });
+        if ((await res.json()).ok) { updateRow(r.id, { inspection_status: "approved" }); ok++; }
+      }
+      toast.success(`${ok}건 승인${ok < targets.length ? ` / 실패 ${targets.length - ok}` : ""}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // 현재 보기의 미발행 카드 전체 선택 / 선택 해제
   const selectAll = () => setSelected(new Set(rows.filter((r) => !r.published).map((r) => r.id)));
   const clearSelection = () => setSelected(new Set());
@@ -510,7 +530,12 @@ export function VivaconStockPanel() {
             </div>
           )}
           {selected.size > 0 && (
-            <button onClick={deleteSelected} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/20 disabled:opacity-50">
+            <button onClick={approveSelected} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/20 disabled:opacity-50">
+              <CheckCircle2 className="h-4 w-4" /> 선택 승인
+            </button>
+          )}
+          {selected.size > 0 && (
+            <button onClick={deleteSelected} disabled={busy} className="flex items-center gap-1 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/20 disabled:opacity-50">
               <Trash2 className="h-4 w-4" /> 선택 삭제
             </button>
           )}
