@@ -288,6 +288,27 @@ export function VivaconStockPanel() {
     }
   };
 
+  // 현재 보기의 미발행 카드 전체 선택 / 선택 해제
+  const selectAll = () => setSelected(new Set(rows.filter((r) => !r.published).map((r) => r.id)));
+  const clearSelection = () => setSelected(new Set());
+
+  // 현재 배치 전체 삭제 (발행분 있으면 서버가 거부)
+  const deleteBatch = async () => {
+    if (!batch) return;
+    if (!confirm(`배치 '${batch.batch_no}' 전체를 삭제합니다.\n검수대기 카드와 이미지가 모두 삭제되며 되돌릴 수 없습니다.\n(발행된 항목이 있으면 삭제되지 않습니다.)\n계속할까요?`)) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/stock/batch?id=${batch.id}`, { method: "DELETE", headers: AUTH });
+      const json = await res.json();
+      if (!json.ok) { toast.error("배치 삭제 실패: " + json.error); return; }
+      toast.success(`배치 삭제 완료 (${json.deleted}건)`);
+      setBatch(null); setRows([]); setSelected(new Set());
+      loadBatches();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // 선택 카드 일괄변경 (상품명/옵션명/유효기간)
   const applyBulk = async () => {
     const targets = rows.filter((r) => selected.has(r.id) && !r.published);
@@ -407,6 +428,7 @@ export function VivaconStockPanel() {
           {batch && !progress && <span className="text-sm text-muted-foreground">현재 배치 <strong>{batch.batch_no}</strong></span>}
           {batch && !progress && <button onClick={newBatch} className="text-xs text-muted-foreground hover:text-foreground underline">새 배치 시작</button>}
           {batch && !progress && <button onClick={() => fetchRows(batch.id)} className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>}
+          {batch && !progress && <button onClick={deleteBatch} disabled={busy} title="이 배치 전체 삭제 (검수대기·미발행만)" className="flex items-center gap-1 rounded-lg border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-sm text-destructive hover:bg-destructive/20 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /> 배치 삭제</button>}
           <button onClick={() => setCodesOpen((v) => !v)} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">
             {codesOpen ? "코드 입력 닫기" : "코드 직접 입력(텍스트)"}
           </button>
@@ -461,6 +483,10 @@ export function VivaconStockPanel() {
       {rows.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
           <span className="text-sm">선택 {selected.size}</span>
+          <button onClick={selectAll} className="rounded-lg border border-border bg-background px-2 py-1 text-xs hover:bg-secondary">전체 선택</button>
+          {selected.size > 0 && (
+            <button onClick={clearSelection} className="rounded-lg border border-border bg-background px-2 py-1 text-xs hover:bg-secondary">선택 해제</button>
+          )}
           {selected.size > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-muted-foreground text-sm">|</span>
