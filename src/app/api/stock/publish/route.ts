@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
-import { copyOcrToPending } from "@/lib/gcp/storage";
+import { copyOcrToPending, uploadOcrImage } from "@/lib/gcp/storage";
 import { slugifyProductName, sanitizeSlug } from "@/lib/ocr/gemini";
 
 const yy = (d: string) => d.slice(2, 4) + d.slice(5, 7) + d.slice(8, 10);
@@ -9,6 +9,26 @@ const todayYY = () => { const n = new Date(); const p = (x: number) => String(x)
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// 셀콘 직결 이미지형 발행 시: 원본 공개 URL → OCR버킷 1회 적재 후 경로 반환(materialize).
+// (수동 업로드 건은 이미 image_path가 있어 이 경로를 타지 않음)
+async function materializeSourceImage(sourceUrl: string, purchYY: string): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 10000);
+  let resp: Response;
+  try { resp = await fetch(sourceUrl, { signal: ctrl.signal }); }
+  finally { clearTimeout(t); }
+  if (!resp.ok) throw new Error(`원본 이미지 fetch 실패(${resp.status})`);
+  const ct = resp.headers.get("content-type") ?? "";
+  const lower = sourceUrl.toLowerCase();
+  const ext = lower.includes(".png") || ct.includes("png") ? "png"
+    : lower.includes(".webp") || ct.includes("webp") ? "webp" : "jpg";
+  const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  const buf = Buffer.from(await resp.arrayBuffer());
+  const destPath = `${purchYY}/sellcon/${crypto.randomUUID()}.${ext}`;
+  await uploadOcrImage(destPath, buf, mime);
+  return destPath;
+}
 
 // 발행: 스테이징 → 실데이터
 //  - 코드형: vivacon coupon_codes INSERT
@@ -80,6 +100,13 @@ export async function POST(req: Request) {
         if (!r.coupon_code) throw new Error("쿠폰번호 없음(파일명 규칙 필수)");
         const expYY = yy(String(r.expiry_date));
         const purchYY = r.purchase_date ? yy(String(r.purchase_date)) : todayYY();
+        // 셀콘 직결 이미지형: GCP 미적재면 원본 공개 URL을 OCR버킷으로 1회 가져와 image_path 확보
+        if (!r.image_path && r.source_image_url) {
+          const matPath = await materializeSourceImage(String(r.source_image_url), purchYY);
+          await sb.from("stock_registrations").update({ image_path: matPath }).eq("id", r.id);
+          r.image_path = matPath;
+        }
+        if (!r.image_path) throw new Error("이미지 경로 없음(원본 URL도 없음) — 검수에서 이미지 확인 필요");
         // 영문 슬러그: 저장값 우선, 없으면 AI 생성
         let slug = sanitizeSlug(String(r.product_slug ?? ""));
         if (!slug) {
