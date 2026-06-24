@@ -36,7 +36,7 @@ interface Reg {
 const QUALITY_COLOR: Record<string, string> = {
   high: "text-green-600", medium: "text-amber-600", low: "text-red-500",
 };
-type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier";
+type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier" | "unit_cost";
 interface Vendor { name: string; name_en: string }
 
 export function VivaconStockPanel() {
@@ -334,6 +334,7 @@ export function VivaconStockPanel() {
     const targets = rows.filter((r) => selected.has(r.id) && !r.published);
     if (targets.length === 0) { toast.error("미발행 카드를 선택하세요"); return; }
     if (bulkField === "expiry_date" && bulkValue && !/^\d{4}-\d{2}-\d{2}$/.test(bulkValue)) { toast.error("유효기간 형식 YYYY-MM-DD"); return; }
+    if (bulkField === "unit_cost" && bulkValue.trim() && !/^[\d,]+$/.test(bulkValue.trim())) { toast.error("매입원가는 숫자만 입력하세요"); return; }
     setBusy(true);
     try {
       for (const r of targets) {
@@ -515,6 +516,7 @@ export function VivaconStockPanel() {
                 <option value="option_name">옵션명</option>
                 <option value="expiry_date">유효기간</option>
                 <option value="supplier">매입처</option>
+                <option value="unit_cost">매입원가</option>
               </select>
               {bulkField === "expiry_date" ? (
                 <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
@@ -523,6 +525,8 @@ export function VivaconStockPanel() {
                   <option value="">매입처 선택</option>
                   {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
                 </select>
+              ) : bulkField === "unit_cost" ? (
+                <input inputMode="numeric" className="w-32 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums" placeholder="매입원가(원)" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
               ) : (
                 <input list={bulkField === "product_name" ? "vivacon-products" : undefined} className="w-40 rounded-lg border border-border bg-background px-2 py-1.5 text-sm" placeholder="변경할 값" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} />
               )}
@@ -602,7 +606,7 @@ export function VivaconStockPanel() {
                   <option value="">매입처</option>
                   {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
                 </select>
-                <input inputMode="numeric" className="w-20 rounded-md border border-border bg-background px-2 py-1 text-right text-xs tabular-nums" placeholder="원가"
+                <input inputMode="numeric" className="w-24 rounded-md border border-border bg-background px-2 py-1 text-right text-xs tabular-nums" placeholder="매입원가"
                   value={r.unit_cost ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9-]/g, "")) })} />
               </div>
               <div className="flex items-center gap-2 text-xs">
