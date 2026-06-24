@@ -83,25 +83,69 @@ function ymdOf(purchaseDate: string | null): string {
   return `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
 }
 
-// 배치 확보(없으면 생성). batchNo = TG-YYMMDD[-매입처]. storageType 으로 배치 라벨(이미지/코드) 지정.
-// 기존 배치의 라벨이 현재 모드와 다르면 갱신(자가치유) — 이미지형/코드형 표시 정확화.
-async function ensureBatch(
-  sb: ReturnType<typeof getServerSupabase>,
-  batchNo: string, supplier: string, purchaseDate: string | null,
-  storageType: "image" | "code" = "code",
+// TG-YYMMDD-매입처-NNN 다음 순번 (해당 날짜·매입처 기존 번호 배치 최대값 +1, 3자리)
+async function nextBatchNo(
+  sb: ReturnType<typeof getServerSupabase>, ymd: string, supplier: string,
 ): Promise<string> {
-  const { data: existing } = await sb.from("stock_batches").select("id, storage_type").eq("batch_no", batchNo).maybeSingle();
-  if (existing?.id) {
-    if (existing.storage_type !== storageType) {
-      await sb.from("stock_batches").update({ storage_type: storageType }).eq("id", existing.id);
-    }
-    return existing.id as string;
+  const base = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
+  const { data } = await sb.from("stock_batches").select("batch_no").like("batch_no", `${base}-%`);
+  let max = 0;
+  for (const b of data ?? []) {
+    const m = /-(\d+)$/.exec(String(b.batch_no));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
   }
-  const { data: nb, error: be } = await sb.from("stock_batches")
+  return `${base}-${String(max + 1).padStart(3, "0")}`;
+}
+
+// 비어있는 배치 정리(삭제) — 설정만 하고 안 채운 배치 방지
+async function cleanupEmptyBatch(sb: ReturnType<typeof getServerSupabase>, batchNo: string): Promise<void> {
+  if (!batchNo) return;
+  const { data: b } = await sb.from("stock_batches").select("id").eq("batch_no", batchNo).maybeSingle();
+  if (!b?.id) return;
+  const { count } = await sb.from("stock_registrations").select("id", { count: "exact", head: true }).eq("batch_id", b.id);
+  if ((count ?? 0) === 0) await sb.from("stock_batches").delete().eq("id", b.id);
+}
+
+// 새 번호 배치 생성(+빈 현재 배치 정리) 후 컨텍스트에 batch_no 저장. (매입설정마다 호출)
+async function assignNewBatch(
+  sb: ReturnType<typeof getServerSupabase>,
+  chatId: number, ymd: string, supplier: string, purchaseDate: string | null,
+  storageType: "image" | "code",
+): Promise<{ batchId: string; batchNo: string }> {
+  const { data: ctx } = await sb.from("telegram_ingest_context").select("batch_no").eq("chat_id", String(chatId)).maybeSingle();
+  await cleanupEmptyBatch(sb, (ctx?.batch_no as string) ?? "");
+  const batchNo = await nextBatchNo(sb, ymd, supplier);
+  const { data: nb, error } = await sb.from("stock_batches")
     .insert({ batch_no: batchNo, storage_type: storageType, default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
     .select("id").single();
-  if (be) throw new Error(be.message);
-  return nb.id as string;
+  if (error) throw new Error(error.message);
+  await sb.from("telegram_ingest_context").update({ batch_no: batchNo }).eq("chat_id", String(chatId));
+  return { batchId: nb.id as string, batchNo };
+}
+
+// 수집 시 세션 배치 확보: 컨텍스트의 현재 배치가 같은 날·매입처면 재사용, 아니면 새 번호 배치.
+async function sessionBatch(
+  sb: ReturnType<typeof getServerSupabase>,
+  chatId: number | undefined, ymd: string, supplier: string, purchaseDate: string | null,
+  storageType: "image" | "code",
+): Promise<{ batchId: string; batchNo: string }> {
+  const base = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
+  if (chatId != null) {
+    const { data: ctx } = await sb.from("telegram_ingest_context").select("batch_no").eq("chat_id", String(chatId)).maybeSingle();
+    const curNo = (ctx?.batch_no as string) ?? "";
+    if (curNo && (curNo === base || curNo.startsWith(`${base}-`))) {
+      const { data: b } = await sb.from("stock_batches").select("id").eq("batch_no", curNo).maybeSingle();
+      if (b?.id) return { batchId: b.id as string, batchNo: curNo };
+    }
+    return assignNewBatch(sb, chatId, ymd, supplier, purchaseDate, storageType);
+  }
+  // chatId 없음(예외): 컨텍스트 저장 없이 번호 배치만 생성
+  const batchNo = await nextBatchNo(sb, ymd, supplier);
+  const { data: nb, error } = await sb.from("stock_batches")
+    .insert({ batch_no: batchNo, storage_type: storageType, default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
+    .select("id").single();
+  if (error) throw new Error(error.message);
+  return { batchId: nb.id as string, batchNo };
 }
 
 // 유효기간 경고 (YYYY-MM-DD). 만료=🔴 / 임박(D-10 이내)=🟡 / 그 외·미인식="".
@@ -298,8 +342,7 @@ export async function POST(req: Request) {
           return NextResponse.json({ ok: true, held: "no-context" });
         }
         const ymd = ymdOf(purchaseDate);
-        const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
-        const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate, "code");
+        const { batchId, batchNo } = await sessionBatch(sb, chatId, ymd, supplier, purchaseDate, "code");
         const optName = await resolveOptionName(sb, productName);
         const cleanCodes = codes.map((code) => code.replace(/\s+/g, ""));
         const dupCount = await countDuplicateCodes(sb, cleanCodes);
@@ -329,24 +372,28 @@ export async function POST(req: Request) {
       }
     }
 
-    // ── 매입 컨텍스트 설정 (YYMMDD 매입처) ──
+    // ── 매입 컨텍스트 설정 (YYMMDD 매입처) → 새 번호 배치 생성 ──
     const ctx = parseCtx(text);
     if (ctx.hasDate && chatId != null) {
+      // 저장형식 미선택이면 배치 생성 보류(이미지/코드 라벨 확정 필요)
+      const { data: pre } = await sb.from("telegram_ingest_context").select("storage_mode").eq("chat_id", String(chatId)).maybeSingle();
+      const mode = (pre?.storage_mode as string) ?? "";
+      if (mode !== "image" && mode !== "code") {
+        await reply("먼저 저장형식을 선택하세요 — '이미지형' 또는 '코드형'.");
+        return NextResponse.json({ ok: true, held: "no-mode" });
+      }
       const v = await resolveVendor(sb, ctx.supplier);
-      // 매입 설정 시 코드모드만 해제(storage_mode 는 보존 — 미지정 컬럼은 upsert가 건드리지 않음)
       await sb.from("telegram_ingest_context").upsert({
         chat_id: String(chatId), purchase_date: ctx.purchaseDate, supplier: v.name,
         code_mode: false, code_product: "", code_expiry: "",
         updated_at: new Date().toISOString(),
       });
-      // 현재 저장형식 조회 → 다음 단계 안내
-      const { data: cur } = await sb.from("telegram_ingest_context").select("*").eq("chat_id", String(chatId)).maybeSingle();
-      const mode = (cur?.storage_mode as string) ?? "";
-      const next = mode === "image" ? "이제 쿠폰 이미지를 올리면 이미지형으로 등록됩니다."
-        : mode === "code" ? "이제 '코드\\n상품명\\nYYMMDD'로 코드를 등록하세요."
-        : "⚠️ '이미지형' 또는 '코드형'을 먼저 선택하세요.";
+      // 매입설정마다 새 번호 배치(빈 직전 배치는 자동 정리)
+      const ymd = ymdOf(ctx.purchaseDate);
+      const { batchNo } = await assignNewBatch(sb, chatId, ymd, v.name, ctx.purchaseDate, mode);
       const tag = !ctx.supplier ? "" : v.matched ? (v.fuzzy ? ` (입력 '${ctx.supplier}' → 매칭)` : "") : " ⚠️ 마스터 미등록(설정>매입처에 추가 권장)";
-      await reply(`📌 매입 설정: ${ctx.purchaseDate}${v.name ? ` · ${v.name}` : ""}${tag}\n${next}`);
+      const next = mode === "image" ? "이제 쿠폰 이미지를 올려주세요(이미지형)." : "이제 '코드\\n상품명\\nYYMMDD'로 코드를 등록하세요.";
+      await reply(`📌 매입 설정: ${ctx.purchaseDate}${v.name ? ` · ${v.name}` : ""}${tag}\n🗂️ 배치: ${batchNo}\n${next}`);
     }
     return NextResponse.json({ ok: true, context: ctx.hasDate });
   }
@@ -399,8 +446,7 @@ export async function POST(req: Request) {
 
     // 배치 확보 (매입일+매입처 기준 TG-YYMMDD-매입처)
     const ymd = ymdOf(purchaseDate);
-    const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
-    const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate, "image");
+    const { batchId, batchNo } = await sessionBatch(sb, chatId, ymd, supplier, purchaseDate, "image");
 
     // GCP 업로드
     const destPath = `${ymd}/${batchNo}/${crypto.randomUUID()}.${isPng ? "png" : "jpg"}`;
