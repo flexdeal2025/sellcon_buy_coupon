@@ -345,6 +345,7 @@ export async function POST(req: Request) {
           extraction_quality: "high",
           inspection_status: "pending",
           stored_as_code: true,
+          proof_type: "no_formal_telegram",   // C경로(개인 매입) — 적격증빙 없음 표식(증빙 집계용)
         }));
         const { data: insRows, error: ie } = await sb.from("stock_registrations").insert(inserts).select("id");
         if (ie) throw new Error(ie.message);
@@ -474,6 +475,7 @@ export async function POST(req: Request) {
       ocr_raw: raw,
       inspection_status: "pending",
       stored_as_code: false,   // 이미지형 모드에서만 도달 → 이미지형으로 저장
+      proof_type: "no_formal_telegram",   // C경로(개인 매입) — 적격증빙 없음 표식(증빙 집계용)
     }).select("id").single();
     if (ie) throw new Error(ie.message);
     if (insRow?.id) await storeLastIds(sb, chatId, [insRow.id as string]);

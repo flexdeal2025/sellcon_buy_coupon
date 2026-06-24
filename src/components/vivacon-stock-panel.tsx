@@ -34,7 +34,7 @@ interface Reg {
 }
 
 const QUALITY_COLOR: Record<string, string> = {
-  high: "text-green-600", medium: "text-amber-600", low: "text-red-500",
+  high: "text-success", medium: "text-warning", low: "text-destructive",
 };
 type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier" | "unit_cost" | "stored_as_code";
 interface Vendor { name: string; name_en: string }
