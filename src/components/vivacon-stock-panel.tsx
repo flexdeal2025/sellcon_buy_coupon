@@ -267,6 +267,27 @@ export function VivaconStockPanel() {
     setSelected((p) => { const s = new Set(p); s.delete(r.id); return s; });
   };
 
+  // 선택 카드 일괄 삭제(검수 취소) — 미발행 건만. 이미지도 함께 삭제.
+  const deleteSelected = async () => {
+    const targets = rows.filter((r) => selected.has(r.id) && !r.published);
+    if (targets.length === 0) { toast.error("삭제할 미발행 카드를 선택하세요"); return; }
+    if (!confirm(`선택한 ${targets.length}건을 검수 취소(삭제)합니다.\n이미지도 함께 삭제되며 되돌릴 수 없습니다. 계속할까요?`)) return;
+    setBusy(true);
+    try {
+      const deleted = new Set<string>();
+      for (const r of targets) {
+        const res = await fetch(`/api/stock/registration?id=${r.id}`, { method: "DELETE", headers: AUTH });
+        if ((await res.json()).ok) deleted.add(r.id);
+      }
+      setRows((prev) => prev.filter((x) => !deleted.has(x.id)));
+      setSelected(new Set());
+      toast.success(`${deleted.size}건 삭제 완료${deleted.size < targets.length ? ` / 실패 ${targets.length - deleted.size}` : ""}`);
+      loadBatches();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // 선택 카드 일괄변경 (상품명/옵션명/유효기간)
   const applyBulk = async () => {
     const targets = rows.filter((r) => selected.has(r.id) && !r.published);
@@ -462,7 +483,12 @@ export function VivaconStockPanel() {
               <button onClick={applyBulk} disabled={busy} className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary disabled:opacity-50">일괄변경</button>
             </div>
           )}
-          <button onClick={publish} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
+          {selected.size > 0 && (
+            <button onClick={deleteSelected} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/20 disabled:opacity-50">
+              <Trash2 className="h-4 w-4" /> 선택 삭제
+            </button>
+          )}
+          <button onClick={publish} disabled={busy} className={cn("flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50", selected.size === 0 && "ml-auto")}>
             <Send className="h-4 w-4" /> 선택 발행
           </button>
         </div>
