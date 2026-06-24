@@ -2,9 +2,9 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, toKST } from "@/lib/utils";
 import { downloadCSV } from "@/lib/csv";
-import { Search, Download, Loader2 } from "lucide-react";
+import { Search, Download, Loader2, Eye, X } from "lucide-react";
 
 interface Row {
   id: string;
@@ -44,6 +44,19 @@ export function StockHistoryPanel() {
   const [loading, setLoading] = useState(false);
   const [capped, setCapped] = useState(false);
 
+  // 쿠폰 확인 뷰어
+  interface Viewer { loading: boolean; url?: string; coupon_code?: string; product_name?: string; option_name?: string; expiry_date?: string | null; stored_as_code?: boolean; published?: boolean }
+  const [viewer, setViewer] = useState<Viewer | null>(null);
+  const openViewer = async (id: string) => {
+    setViewer({ loading: true });
+    try {
+      const res = await fetch(`/api/stock/image?id=${id}`);
+      const json = await res.json();
+      if (!json.ok) { toast.error("쿠폰 확인 실패: " + json.error); setViewer(null); return; }
+      setViewer({ loading: false, ...json });
+    } catch { toast.error("쿠폰 확인 중 오류"); setViewer(null); }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     const p = new URLSearchParams({ dateField, storage, published });
@@ -65,7 +78,7 @@ export function StockHistoryPanel() {
   // 최초 1회 로드(최근 등록 이력)
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  const fmtDT = (s: string | null) => (s ? s.slice(0, 16).replace("T", " ") : "-");
+  const fmtDT = (s: string | null) => toKST(s) || "-"; // 등록일시는 KST 표시
 
   const exportCSV = () => {
     const data = rows.map((r) => ({
@@ -143,13 +156,14 @@ export function StockHistoryPanel() {
               <th className="px-2 py-2 text-center">검수</th>
               <th className="px-2 py-2 text-center">발행</th>
               <th className="px-2 py-2 text-left">배치</th>
+              <th className="px-2 py-2 text-center">쿠폰</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={10} className="py-8 text-center text-muted-foreground"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
+              <tr><td colSpan={11} className="py-8 text-center text-muted-foreground"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">조회 결과가 없습니다.</td></tr>
+              <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">조회 결과가 없습니다.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.id} className={cn("border-b border-border/40", r.published ? "bg-green-50/30 dark:bg-green-950/10" : "")}>
                 <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{fmtDT(r.created_at)}</td>
@@ -162,11 +176,44 @@ export function StockHistoryPanel() {
                 <td className={cn("px-2 py-1.5 text-center", r.inspection_status === "approved" ? "text-primary" : r.inspection_status === "rejected" ? "text-destructive" : "text-amber-600")}>{INSPECT_LABEL[r.inspection_status] ?? r.inspection_status}</td>
                 <td className={cn("px-2 py-1.5 text-center", r.published ? "text-green-600 font-medium" : "text-muted-foreground")}>{r.published ? "발행" : "—"}</td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.batch_no || "-"}</td>
+                <td className="px-2 py-1.5 text-center">
+                  <button onClick={() => openViewer(r.id)} title="쿠폰 확인" className="text-muted-foreground hover:text-primary"><Eye className="h-4 w-4" /></button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* 쿠폰 확인 뷰어 */}
+      {viewer && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4" onClick={() => setViewer(null)}>
+          <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-xl bg-background p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold">{viewer.stored_as_code ? "코드형 재고" : "이미지형 재고"}{viewer.published ? " · 발행완료" : ""}</span>
+              <button onClick={() => setViewer(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+            {viewer.loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <div className="space-y-2 text-sm">
+                {viewer.url ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={viewer.url} alt="쿠폰 이미지" className="mx-auto max-h-[60vh] rounded-lg border border-border object-contain" />
+                ) : (
+                  <p className="rounded-lg bg-secondary p-4 text-center text-muted-foreground">이미지 없음 (코드형 — 아래 쿠폰번호로 확인)</p>
+                )}
+                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border border-border p-3">
+                  <span className="text-muted-foreground">상품명</span><span>{viewer.product_name || "-"}</span>
+                  {viewer.option_name ? (<><span className="text-muted-foreground">옵션명</span><span>{viewer.option_name}</span></>) : null}
+                  <span className="text-muted-foreground">쿠폰번호</span><span className="font-mono select-all">{viewer.coupon_code || "-"}</span>
+                  <span className="text-muted-foreground">유효기간</span><span>{viewer.expiry_date ?? "-"}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

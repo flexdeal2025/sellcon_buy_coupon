@@ -33,3 +33,17 @@ export function toDateInput(d: Date = new Date()): string {
 export function formatYearMonth(d: Date = new Date()): string {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월`;
 }
+
+/**
+ * timestamptz(ISO·UTC 저장값) → KST 표시 문자열. 브라우저 타임존과 무관하게 항상 KST(UTC+9).
+ * dateOnly=true 면 'YYYY-MM-DD', 아니면 'YYYY-MM-DD HH:mm'. (DATE 컬럼은 변환 불필요 — 그대로 표시)
+ */
+export function toKST(iso: string | null | undefined, dateOnly = false): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const k = new Date(d.getTime() + 9 * 3600 * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const date = `${k.getUTCFullYear()}-${p(k.getUTCMonth() + 1)}-${p(k.getUTCDate())}`;
+  return dateOnly ? date : `${date} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
+}
