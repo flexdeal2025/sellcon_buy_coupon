@@ -25,15 +25,15 @@ export default function RootLayout({
   return (
     <html lang="ko" className="h-full antialiased">
       <head>
-        {/* Pretendard - 한국어 가독성 최적화 폰트 */}
+        {/* Wanted Sans - 모던·고가독성 국내 폰트 (OFL, 상업용 무료) */}
         <link
           rel="stylesheet"
-          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css"
+          href="https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css"
         />
       </head>
       <body
         className="min-h-full bg-background font-sans text-foreground"
-        style={{ ["--font-pretendard" as string]: "Pretendard Variable" }}
+        style={{ ["--font-app" as string]: "Wanted Sans Variable" }}
       >
         <PasscodeGate>
           <AppShell>{children}</AppShell>

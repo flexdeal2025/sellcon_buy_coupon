@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import JsBarcode from "jsbarcode";
-import { Upload, Loader2, ImageIcon, Sparkles } from "lucide-react";
+import { Upload, Loader2, ImageIcon, Sparkles, Save, Trash2 } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
-// 앱과 동일 폰트(Pretendard, layout.tsx에서 CDN 로드) → 캔버스도 동일 글꼴
-const FONT = "'Pretendard Variable', Pretendard, system-ui, sans-serif";
+// 앱과 동일 폰트(Wanted Sans, layout.tsx에서 CDN 로드) → 캔버스도 동일 글꼴
+const FONT = "'Wanted Sans Variable', system-ui, sans-serif";
 
 // 기본 좌표 — 약 800×1400 템플릿(상단 상품박스 + '상품명' 라벨 + 바코드박스 + '유효기간' 라벨) 기준.
 // 라벨('상품명'·'유효기간')은 템플릿에 인쇄돼 있고, 실제 값은 라벨 오른쪽에 렌더된다.
@@ -19,7 +19,7 @@ const DEFAULT_COORDS = {
   prodX: 40, prodY: 40, prodSize: 720,
   nameX: 230, nameY: 818, nameFont: 34, nameMaxW: 520,
   bcX: 80, bcY: 962, bcW: 640, bcH: 210, bcFont: 22,
-  expX: 230, expY: 1255, expFont: 40,
+  expX: 480, expY: 1255, expFont: 40,
 };
 type Coords = typeof DEFAULT_COORDS;
 
@@ -52,6 +52,13 @@ export function GifticonConvertPanel() {
   const [productImg, setProductImg] = useState<HTMLImageElement | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [productName2, setProductName2] = useState("");
+  const [templateFile, setTemplateFile] = useState<Blob | null>(null);
+  const [productFile, setProductFile] = useState<Blob | null>(null);
+
+  // 저장된 템플릿
+  interface TplRow { id: string; name: string; coords: Partial<Coords>; name_autofit: boolean; has_product: boolean }
+  const [templates, setTemplates] = useState<TplRow[]>([]);
+  const [saveName, setSaveName] = useState("");
 
   const [mode, setMode] = useState<"list" | "excel">("list");
   const [listText, setListText] = useState("");
@@ -70,11 +77,79 @@ export function GifticonConvertPanel() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const stopRef = useRef(false);
 
-  const loadImage = (file: File, set: (img: HTMLImageElement) => void, setName: (n: string) => void) => {
+  const loadImage = (
+    file: Blob, setImg: (img: HTMLImageElement) => void, setName: (n: string) => void,
+    setFile: (f: Blob) => void, displayName?: string,
+  ) => {
     const img = new Image();
-    img.onload = () => { set(img); setName(file.name); };
+    img.onload = () => { setImg(img); setName(displayName ?? (file instanceof File ? file.name : "이미지")); setFile(file); };
     img.onerror = () => toast.error("이미지를 불러오지 못했습니다");
     img.src = URL.createObjectURL(file);
+  };
+
+  // ── 저장된 템플릿: 목록·저장·불러오기·삭제 ───────────────────────────────
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/gifticon-templates");
+      const j = await res.json();
+      if (j.ok) setTemplates(j.rows as TplRow[]);
+    } catch { /* 목록 로드 실패는 조용히 무시 */ }
+  }, []);
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
+
+  const saveTemplate = async () => {
+    if (!templateFile) { toast.error("먼저 템플릿(프레임) 이미지를 선택하세요"); return; }
+    const nm = (saveName.trim() || productName2 || templateName || "템플릿").slice(0, 60);
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("name", nm);
+      fd.append("template", templateFile);
+      if (productFile) fd.append("product", productFile);
+      fd.append("coords", JSON.stringify(coords));
+      fd.append("name_autofit", String(nameAutoFit));
+      const res = await fetch("/api/gifticon-templates", { method: "POST", headers: AUTH, body: fd });
+      const j = await res.json();
+      if (!j.ok) { toast.error("저장 실패: " + (j.error ?? "")); return; }
+      toast.success(`템플릿 저장됨: ${nm}`);
+      setSaveName("");
+      loadTemplates();
+    } catch (e) {
+      toast.error("저장 실패: " + (e instanceof Error ? e.message : ""));
+    } finally { setBusy(false); }
+  };
+
+  const applyTemplate = async (id: string) => {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    setBusy(true);
+    try {
+      if (t.coords) setCoords({ ...DEFAULT_COORDS, ...t.coords });
+      setNameAutoFit(t.name_autofit);
+      // 동일 출처 프록시로 로드 → 캔버스 CORS 오염 방지
+      const tb = await (await fetch(`/api/gifticon-templates/asset?id=${id}&which=template`)).blob();
+      loadImage(tb, setTemplateImg, setTemplateName, setTemplateFile, `${t.name} (템플릿)`);
+      if (t.has_product) {
+        const pb = await (await fetch(`/api/gifticon-templates/asset?id=${id}&which=product`)).blob();
+        loadImage(pb, setProductImg, setProductName2, setProductFile, `${t.name} (상품)`);
+      }
+      toast.success(`템플릿 불러옴: ${t.name}`);
+    } catch (e) {
+      toast.error("불러오기 실패: " + (e instanceof Error ? e.message : ""));
+    } finally { setBusy(false); }
+  };
+
+  const deleteTemplate = async (id: string, name: string) => {
+    if (!confirm(`템플릿 '${name}'을(를) 삭제할까요?`)) return;
+    try {
+      const res = await fetch(`/api/gifticon-templates?id=${id}`, { method: "DELETE", headers: AUTH });
+      const j = await res.json();
+      if (!j.ok) { toast.error("삭제 실패: " + (j.error ?? "")); return; }
+      toast.success("삭제됨");
+      loadTemplates();
+    } catch (e) {
+      toast.error("삭제 실패: " + (e instanceof Error ? e.message : ""));
+    }
   };
 
   // 리스트 텍스트 파싱 (상품명,코드,유효기간 — 쉼표/탭 구분)
@@ -133,8 +208,11 @@ export function GifticonConvertPanel() {
       while (nf > 12 && ctx.measureText(it.name).width > coords.nameMaxW) { nf -= 1; ctx.font = `${nf}px ${FONT}`; }
     }
     ctx.fillText(it.name, coords.nameX, coords.nameY);
+    // 유효기간 값: '유효기간' 라벨과 우측 테두리 사이 가로 중앙 정렬(expX = 중앙 X)
     ctx.font = `${coords.expFont}px ${FONT}`;
+    ctx.textAlign = "center";
     ctx.fillText(`~${it.expiryText}`, coords.expX, coords.expY);
+    ctx.textAlign = "left";
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("이미지 생성 실패"))), "image/png");
   });
 
@@ -204,7 +282,7 @@ export function GifticonConvertPanel() {
   const COORD_FIELDS: [keyof Coords, string][] = [
     ["prodX", "상품X"], ["prodY", "상품Y"], ["prodSize", "상품크기"],
     ["bcX", "바코드X"], ["bcY", "바코드Y"], ["bcW", "바코드W"], ["bcH", "바코드H"],
-    ["expX", "유효X"], ["expY", "유효Y"], ["expFont", "유효pt"],
+    ["expX", "유효중앙X"], ["expY", "유효Y"], ["expFont", "유효pt"],
   ];
   const setC = (k: keyof Coords) => (n: number) => setCoords((c) => ({ ...c, [k]: n }));
 
@@ -220,13 +298,55 @@ export function GifticonConvertPanel() {
         <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
           <ImageIcon className="h-4 w-4 text-muted-foreground" />
           <span className="truncate">{templateName || "템플릿 프레임 이미지 선택"}</span>
-          <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && loadImage(e.target.files[0], setTemplateImg, setTemplateName)} />
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && loadImage(e.target.files[0], setTemplateImg, setTemplateName, setTemplateFile)} />
         </label>
         <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
           <ImageIcon className="h-4 w-4 text-muted-foreground" />
           <span className="truncate">{productName2 || "상품 이미지 선택(선택)"}</span>
-          <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && loadImage(e.target.files[0], setProductImg, setProductName2)} />
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && loadImage(e.target.files[0], setProductImg, setProductName2, setProductFile)} />
         </label>
+      </div>
+
+      {/* 1-b. 템플릿 저장·재활용 */}
+      <div className="space-y-2 rounded-xl border border-border bg-secondary/40 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value=""
+            onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); }}
+            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="">저장된 템플릿 불러오기…</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <input
+            className="min-w-[180px] flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+            placeholder="저장할 이름 (예: 세븐일레븐 3만원권)"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+          />
+          <button
+            onClick={saveTemplate}
+            disabled={busy || !templateFile}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            <Save className="h-4 w-4" /> 현재 설정 저장
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          프레임·상품 이미지·좌표/폰트 설정을 저장해, 동일 상품을 다시 매입할 때 그대로 불러옵니다.
+        </p>
+        {templates.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {templates.map((t) => (
+              <span key={t.id} className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-xs">
+                {t.name}
+                <button onClick={() => deleteTemplate(t.id, t.name)} className="text-muted-foreground hover:text-destructive" title="삭제">
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 2. 공통 정보 */}
