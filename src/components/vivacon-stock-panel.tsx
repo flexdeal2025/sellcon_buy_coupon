@@ -606,7 +606,7 @@ export function VivaconStockPanel() {
                   <option value="">매입처</option>
                   {vendors.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
                 </select>
-                <input inputMode="numeric" className="w-20 rounded-md border border-border bg-background px-2 py-1 text-right text-xs tabular-nums" placeholder="원가"
+                <input inputMode="numeric" className="w-24 rounded-md border border-border bg-background px-2 py-1 text-right text-xs tabular-nums" placeholder="매입원가"
                   value={r.unit_cost ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9-]/g, "")) })} />
               </div>
               <div className="flex items-center gap-2 text-xs">
