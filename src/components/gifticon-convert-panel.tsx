@@ -16,7 +16,7 @@ const FONT = "'Malgun Gothic','Apple SD Gothic Neo','Nanum Gothic','Noto Sans KR
 // 템플릿 해상도/디자인이 다르면 아래 '레이아웃'에서 조정(미리보기로 확인).
 const DEFAULT_COORDS = {
   prodX: 40, prodY: 40, prodSize: 720,
-  nameX: 230, nameY: 818, nameFont: 34,
+  nameX: 230, nameY: 818, nameFont: 34, nameMaxW: 520,
   bcX: 80, bcY: 962, bcW: 640, bcH: 210, bcFont: 22,
   expX: 230, expY: 1258, expFont: 34,
 };
@@ -62,6 +62,7 @@ export function GifticonConvertPanel() {
   const [unitCost, setUnitCost] = useState("");
 
   const [coords, setCoords] = useState<Coords>(DEFAULT_COORDS);
+  const [nameAutoFit, setNameAutoFit] = useState(true);
   const [coordsOpen, setCoordsOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -124,7 +125,12 @@ export function GifticonConvertPanel() {
     } catch { /* 바코드 실패해도 텍스트는 진행 */ }
     ctx.fillStyle = "black";
     ctx.textBaseline = "top";
-    ctx.font = `${coords.nameFont}px ${FONT}`;
+    // 상품명 — 자동 폭맞춤: 길면 최대폭에 맞게 글자 축소(짧으면 기본 크기 그대로)
+    let nf = coords.nameFont;
+    ctx.font = `${nf}px ${FONT}`;
+    if (nameAutoFit && coords.nameMaxW > 0) {
+      while (nf > 12 && ctx.measureText(it.name).width > coords.nameMaxW) { nf -= 1; ctx.font = `${nf}px ${FONT}`; }
+    }
     ctx.fillText(it.name, coords.nameX, coords.nameY);
     ctx.font = `${coords.expFont}px ${FONT}`;
     ctx.fillText(`~${it.expiryText}`, coords.expX, coords.expY);
@@ -194,10 +200,10 @@ export function GifticonConvertPanel() {
 
   const COORD_FIELDS: [keyof Coords, string][] = [
     ["prodX", "상품X"], ["prodY", "상품Y"], ["prodSize", "상품크기"],
-    ["nameX", "상품명X"], ["nameY", "상품명Y"], ["nameFont", "상품명pt"],
     ["bcX", "바코드X"], ["bcY", "바코드Y"], ["bcW", "바코드W"], ["bcH", "바코드H"],
     ["expX", "유효X"], ["expY", "유효Y"], ["expFont", "유효pt"],
   ];
+  const setC = (k: keyof Coords) => (n: number) => setCoords((c) => ({ ...c, [k]: n }));
 
   return (
     <div className="space-y-3">
@@ -255,7 +261,23 @@ export function GifticonConvertPanel() {
         <p className="text-xs text-muted-foreground">인식된 항목 <strong className="text-foreground">{list.length}</strong>건</p>
       </div>
 
-      {/* 4. 레이아웃 좌표(고급) */}
+      {/* 4. 상품명 표시 (길이 가변 → 위치·크기 자유 조정 + 자동 축소) */}
+      <div className="space-y-2 rounded-xl border border-border bg-secondary/40 p-3">
+        <p className="text-sm font-medium">상품명 표시 <span className="text-xs font-normal text-muted-foreground">(길이에 따라 위치·크기 자유 조정)</span></p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <CoordInput label="좌우(X)" value={coords.nameX} onChange={setC("nameX")} />
+          <CoordInput label="상하(Y)" value={coords.nameY} onChange={setC("nameY")} />
+          <CoordInput label="글자크기" value={coords.nameFont} onChange={setC("nameFont")} />
+          <label className="flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={nameAutoFit} onChange={(e) => setNameAutoFit(e.target.checked)} />
+            긴 이름 자동 축소(폭 맞춤)
+          </label>
+          {nameAutoFit && <CoordInput label="최대폭" value={coords.nameMaxW} onChange={setC("nameMaxW")} />}
+        </div>
+        <p className="text-xs text-muted-foreground">짧은 이름은 설정한 글자크기 그대로, 긴 이름은 최대폭에 맞춰 자동으로 작아집니다. 미리보기로 확인하세요.</p>
+      </div>
+
+      {/* 5. 레이아웃 좌표(고급) */}
       <div className="rounded-xl border border-border bg-secondary/40 p-3">
         <button onClick={() => setCoordsOpen((v) => !v)} className="text-sm font-medium">레이아웃 좌표 {coordsOpen ? "▲" : "▼"} <span className="text-xs font-normal text-muted-foreground">(템플릿이 다르면 조정)</span></button>
         {coordsOpen && (
