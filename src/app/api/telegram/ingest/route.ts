@@ -83,15 +83,22 @@ function ymdOf(purchaseDate: string | null): string {
   return `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
 }
 
-// 배치 확보(없으면 생성). batchNo = TG-YYMMDD[-매입처]. (이미지·코드 경로 공통)
+// 배치 확보(없으면 생성). batchNo = TG-YYMMDD[-매입처]. storageType 으로 배치 라벨(이미지/코드) 지정.
+// 기존 배치의 라벨이 현재 모드와 다르면 갱신(자가치유) — 이미지형/코드형 표시 정확화.
 async function ensureBatch(
   sb: ReturnType<typeof getServerSupabase>,
   batchNo: string, supplier: string, purchaseDate: string | null,
+  storageType: "image" | "code" = "code",
 ): Promise<string> {
-  const { data: existing } = await sb.from("stock_batches").select("id").eq("batch_no", batchNo).maybeSingle();
-  if (existing?.id) return existing.id as string;
+  const { data: existing } = await sb.from("stock_batches").select("id, storage_type").eq("batch_no", batchNo).maybeSingle();
+  if (existing?.id) {
+    if (existing.storage_type !== storageType) {
+      await sb.from("stock_batches").update({ storage_type: storageType }).eq("id", existing.id);
+    }
+    return existing.id as string;
+  }
   const { data: nb, error: be } = await sb.from("stock_batches")
-    .insert({ batch_no: batchNo, storage_type: "code", default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
+    .insert({ batch_no: batchNo, storage_type: storageType, default_exchange_location: supplier, purchase_date: purchaseDate, created_by: "telegram" })
     .select("id").single();
   if (be) throw new Error(be.message);
   return nb.id as string;
@@ -292,7 +299,7 @@ export async function POST(req: Request) {
         }
         const ymd = ymdOf(purchaseDate);
         const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
-        const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate);
+        const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate, "code");
         const optName = await resolveOptionName(sb, productName);
         const cleanCodes = codes.map((code) => code.replace(/\s+/g, ""));
         const dupCount = await countDuplicateCodes(sb, cleanCodes);
@@ -393,7 +400,7 @@ export async function POST(req: Request) {
     // 배치 확보 (매입일+매입처 기준 TG-YYMMDD-매입처)
     const ymd = ymdOf(purchaseDate);
     const batchNo = supplier ? `TG-${ymd}-${supplier}` : `TG-${ymd}`;
-    const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate);
+    const batchId = await ensureBatch(sb, batchNo, supplier, purchaseDate, "image");
 
     // GCP 업로드
     const destPath = `${ymd}/${batchNo}/${crypto.randomUUID()}.${isPng ? "png" : "jpg"}`;
