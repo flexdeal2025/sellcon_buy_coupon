@@ -211,22 +211,34 @@ export async function POST(req: Request) {
       await reply(`↩️ 직전 등록 ${removed}건 취소(삭제)했습니다.${protectedN > 0 ? `\n(검수완료·발행분 ${protectedN}건은 보호되어 제외)` : ""}`);
       return NextResponse.json({ ok: true, cancelled: removed });
     }
+    // ── 저장형식 선택 (수집 첫 단계): '이미지형' / '코드형' ──
+    if (/^(이미지형|이미지)$/i.test(text) && chatId != null) {
+      await sb.from("telegram_ingest_context").upsert({
+        chat_id: String(chatId), storage_mode: "image", code_mode: false,
+        updated_at: new Date().toISOString(),
+      });
+      await reply("🖼️ 이미지형 선택됨.\n다음: 'YYMMDD 매입처'를 보낸 뒤(예: 260625 당근), 쿠폰 이미지를 올려주세요.\n→ 이미지형 재고로 등록됩니다.");
+      return NextResponse.json({ ok: true, mode: "image" });
+    }
+    if (/^(코드형|코드입력)$/i.test(text) && chatId != null) {
+      await sb.from("telegram_ingest_context").upsert({
+        chat_id: String(chatId), storage_mode: "code", code_mode: false,
+        updated_at: new Date().toISOString(),
+      });
+      await reply("🔢 코드형 선택됨.\n다음: 'YYMMDD 매입처'를 보낸 뒤, '코드\\n상품명\\nYYMMDD'로 코드를 등록하세요.\n→ 코드형 재고로 등록됩니다.");
+      return NextResponse.json({ ok: true, mode: "code" });
+    }
     if (/^(도움말|help|\?)$/i.test(text)) {
       await reply(
-        "📖 수집 봇 사용법\n\n" +
-        "1️⃣ 매입 설정: 'YYMMDD 매입처' (예: 260623 당근)\n" +
-        "   → 매입일·매입처가 설정됩니다.\n\n" +
-        "2️⃣ 이미지 전송: 설정 후 쿠폰 이미지를 올리면\n" +
-        "   → AI OCR → 검수대기로 자동 등록\n\n" +
-        "3️⃣ 코드 등록: 줄바꿈으로\n" +
-        "   코드\n   상품명(부분 OK)\n   유효기간(YYMMDD)\n" +
-        "   → 코드모드 진입, 이후 코드 줄바꿈 전송\n\n" +
-        "4️⃣ 종료: '종료' 또는 '끝'\n" +
-        "   → 수집 중지(실수 방지)\n\n" +
-        "5️⃣ 취소: '취소'\n" +
-        "   → 직전 등록 묶음 삭제(검수대기·미발행만)\n\n" +
-        "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송\n" +
-        "💡 캡션에 'YYMMDD 매입처'를 직접 달면 그 장만 적용"
+        "📖 수집 봇 사용법 (순서대로)\n\n" +
+        "1️⃣ 저장형식 선택: '이미지형' 또는 '코드형'\n\n" +
+        "2️⃣ 매입 설정: 'YYMMDD 매입처' (예: 260623 당근)\n\n" +
+        "3️⃣ 수집:\n" +
+        "   • 이미지형 → 쿠폰 이미지 업로드 (AI OCR → 검수대기)\n" +
+        "   • 코드형 → '코드\\n상품명(부분 OK)\\n유효기간(YYMMDD)' 보낸 뒤 코드 줄바꿈 전송\n\n" +
+        "🔚 종료: '종료'/'끝' · ↩️ 취소: '취소'(직전 묶음 삭제)\n" +
+        "💡 형식을 바꾸려면 '이미지형'/'코드형' 다시 전송\n" +
+        "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송"
       );
       return NextResponse.json({ ok: true, help: true });
     }
@@ -247,7 +259,7 @@ export async function POST(req: Request) {
       const displayName = prod.matched ? prod.name.replace(/^\[비바콘\]\s*/, "") : productRaw;
       await sb.from("telegram_ingest_context").upsert({
         chat_id: String(chatId),
-        code_mode: true, code_product: prod.name, code_expiry: expDate,
+        code_mode: true, storage_mode: "code", code_product: prod.name, code_expiry: expDate,
         updated_at: new Date().toISOString(),
       });
       const matchTag = prod.matched ? "" : "\n⚠️ 상품 미매칭 — 검수에서 수정 가능";
@@ -312,14 +324,20 @@ export async function POST(req: Request) {
     const ctx = parseCtx(text);
     if (ctx.hasDate && chatId != null) {
       const v = await resolveVendor(sb, ctx.supplier);
-      // 매입 설정 시 코드모드 해제
+      // 매입 설정 시 코드모드만 해제(storage_mode 는 보존 — 미지정 컬럼은 upsert가 건드리지 않음)
       await sb.from("telegram_ingest_context").upsert({
         chat_id: String(chatId), purchase_date: ctx.purchaseDate, supplier: v.name,
         code_mode: false, code_product: "", code_expiry: "",
         updated_at: new Date().toISOString(),
       });
+      // 현재 저장형식 조회 → 다음 단계 안내
+      const { data: cur } = await sb.from("telegram_ingest_context").select("*").eq("chat_id", String(chatId)).maybeSingle();
+      const mode = (cur?.storage_mode as string) ?? "";
+      const next = mode === "image" ? "이제 쿠폰 이미지를 올리면 이미지형으로 등록됩니다."
+        : mode === "code" ? "이제 '코드\\n상품명\\nYYMMDD'로 코드를 등록하세요."
+        : "⚠️ '이미지형' 또는 '코드형'을 먼저 선택하세요.";
       const tag = !ctx.supplier ? "" : v.matched ? (v.fuzzy ? ` (입력 '${ctx.supplier}' → 매칭)` : "") : " ⚠️ 마스터 미등록(설정>매입처에 추가 권장)";
-      await reply(`📌 매입 설정: ${ctx.purchaseDate}${v.name ? ` · ${v.name}` : ""}${tag}\n이미지 → 자동 OCR 등록 / 코드 → '코드\\n상품명\\nYYMMDD'로 전환`);
+      await reply(`📌 매입 설정: ${ctx.purchaseDate}${v.name ? ` · ${v.name}` : ""}${tag}\n${next}`);
     }
     return NextResponse.json({ ok: true, context: ctx.hasDate });
   }
@@ -341,6 +359,19 @@ export async function POST(req: Request) {
       const { data: row } = await sb.from("telegram_ingest_context")
         .select("purchase_date, supplier").eq("chat_id", String(chatId)).maybeSingle();
       if (row) { purchaseDate = row.purchase_date as string | null; supplier = (row.supplier as string) ?? ""; }
+    }
+
+    // 저장형식 게이트 — 이미지형 모드에서만 이미지 등록(미선택/코드형이면 보류)
+    let storageMode = "";
+    if (chatId != null) {
+      const { data: smRow } = await sb.from("telegram_ingest_context").select("*").eq("chat_id", String(chatId)).maybeSingle();
+      storageMode = (smRow?.storage_mode as string) ?? "";
+    }
+    if (storageMode !== "image") {
+      await reply(storageMode === "code"
+        ? "🔢 코드형 모드입니다 — 이미지 대신 '코드\\n상품명\\nYYMMDD'로 등록하거나, 이미지형으로 바꾸려면 '이미지형'을 보내세요."
+        : "먼저 저장형식을 선택하세요 — '이미지형' 또는 '코드형'.");
+      return NextResponse.json({ ok: true, held: "no-mode" });
     }
 
     // 매입일 미설정 보류 — OCR/업로드 비용 쓰기 전에 차단(돈 추적 끊김 방지)
@@ -402,7 +433,7 @@ export async function POST(req: Request) {
       extraction_quality: quality(ocr.confidence),
       ocr_raw: raw,
       inspection_status: "pending",
-      stored_as_code: true,
+      stored_as_code: false,   // 이미지형 모드에서만 도달 → 이미지형으로 저장
     }).select("id").single();
     if (ie) throw new Error(ie.message);
     if (insRow?.id) await storeLastIds(sb, chatId, [insRow.id as string]);
@@ -411,7 +442,7 @@ export async function POST(req: Request) {
     const ctxNote = !supplier ? "\n⚠️ 매입처 미설정 — 'YYMMDD 매입처'로 설정 권장(증빙 추적)" : "";
     const ocrNote = ocrErr ? `\n⚠️ OCR 실패: ${ocrErr}` : (!ocr.product_name && !ocr.coupon_code ? "\n⚠️ OCR 인식 0건 — 검수에서 수동 입력하세요." : "");
     const expNote = expiryWarning(ocr.expiry_date);
-    await reply(`✅ 등록(검수대기): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""} · ${purchaseDate}${expNote}${ctxNote}${ocrNote}${dupNote}`);
+    await reply(`✅ 등록(검수대기·이미지형): ${ocr.product_name || "상품명 미인식"} / 코드 ${codeMask}\n배치 ${batchNo}${supplier ? ` · ${supplier}` : ""} · ${purchaseDate}${expNote}${ctxNote}${ocrNote}${dupNote}`);
     return NextResponse.json({ ok: true, batch: batchNo });
   } catch (e) {
     await reply("⚠️ 처리 실패: " + (e instanceof Error ? e.message : "오류"));
