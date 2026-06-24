@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { deleteOcrImage } from "@/lib/gcp/storage";
+import { ingestAuthOk } from "@/lib/ingest-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -28,14 +29,6 @@ function ymdOf(purchaseDate: string | null): string {
   return `${pad(n.getFullYear() % 100)}${pad(n.getMonth() + 1)}${pad(n.getDate())}`;
 }
 
-// Authorization: Bearer <STOCK_INGEST_KEY>. 키 미설정이면 거부(연동 비활성=잠금).
-function authOk(req: Request): boolean {
-  const key = process.env.STOCK_INGEST_KEY;
-  if (!key) return false;
-  const m = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "");
-  return !!m && m[1] === key;
-}
-
 // 셀콘 일배치(SC-YYMMDD) 확보. 동시성 시 재조회로 수렴.
 async function ensureSellconBatch(
   sb: ReturnType<typeof getServerSupabase>,
@@ -56,7 +49,7 @@ async function ensureSellconBatch(
 }
 
 export async function POST(req: Request) {
-  if (!authOk(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if (!ingestAuthOk(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   let b: Record<string, unknown>;
   try { b = await req.json(); } catch { return NextResponse.json({ ok: false, error: "invalid json" }, { status: 400 }); }
@@ -128,7 +121,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  if (!authOk(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if (!ingestAuthOk(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   const source_ref = new URL(req.url).searchParams.get("source_ref");
   if (!source_ref) return NextResponse.json({ ok: false, error: "source_ref 필요" }, { status: 400 });
