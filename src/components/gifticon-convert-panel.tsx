@@ -11,12 +11,14 @@ const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
 const FONT = "'Malgun Gothic','Apple SD Gothic Neo','Nanum Gothic','Noto Sans KR',sans-serif";
 
-// 템플릿(파이썬 도구 기준) 기본 좌표 — 템플릿이 다르면 아래 '레이아웃' 에서 조정
+// 기본 좌표 — 약 800×1400 템플릿(상단 상품박스 + '상품명' 라벨 + 바코드박스 + '유효기간' 라벨) 기준.
+// 라벨('상품명'·'유효기간')은 템플릿에 인쇄돼 있고, 실제 값은 라벨 오른쪽에 렌더된다.
+// 템플릿 해상도/디자인이 다르면 아래 '레이아웃'에서 조정(미리보기로 확인).
 const DEFAULT_COORDS = {
-  prodX: 29, prodY: 30, prodSize: 742,
-  nameX: 230, nameY: 825, nameFont: 30,
-  bcX: 82, bcY: 966, bcW: 635, bcH: 220, bcFont: 20,
-  expX: 230, expY: 1268, expFont: 36,
+  prodX: 40, prodY: 40, prodSize: 720,
+  nameX: 230, nameY: 818, nameFont: 34,
+  bcX: 80, bcY: 962, bcW: 640, bcH: 210, bcFont: 22,
+  expX: 230, expY: 1258, expFont: 34,
 };
 type Coords = typeof DEFAULT_COORDS;
 
