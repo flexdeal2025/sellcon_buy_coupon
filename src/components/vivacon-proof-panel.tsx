@@ -12,6 +12,13 @@ const AUTH = { "x-app-passcode": PASSCODE };
 interface Proof {
   id: string; platform: string; trader_name: string; proof_date: string | null;
   amount: number | null; memo: string; image_url: string; linked_count: number; linked_cost: number;
+  ocr_product_name?: string | null; trade_type?: string | null; trade_no?: string | null; product_amount?: number | null;
+}
+interface Suggestion {
+  recommended_ids: string[];
+  amount_matched: boolean;
+  proof_name: string;
+  candidates: Array<{ registration_id: string; product_name: string; score: number; unit_cost?: number | null }>;
 }
 interface Reg {
   id: string; product_name: string; option_name: string; coupon_code: string;
@@ -29,6 +36,8 @@ export function VivaconProofPanel() {
   const [activeProof, setActiveProof] = useState<string | null>(null);
   const [selectedRegs, setSelectedRegs] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
 
   // 업로드 폼
   const [platform, setPlatform] = useState("당근마켓");
@@ -84,21 +93,50 @@ export function VivaconProofPanel() {
     const arr = Array.from(files);
     setBusy(true);
     try {
+      let okCount = 0;
       for (const f of arr) {
         const fd = new FormData();
         fd.append("file", f);
-        fd.append("platform", platform);
-        fd.append("trader_name", trader);
+        // 폼에 값이 있으면 우선, 없으면 서버가 OCR로 자동 채움
+        if (platform) fd.append("platform", platform);
+        if (trader) fd.append("trader_name", trader);
         if (pDate) fd.append("proof_date", pDate);
         if (amount) fd.append("amount", amount);
         const res = await fetch("/api/proof/upload", { method: "POST", headers: AUTH, body: fd });
         const json = await res.json();
-        if (!json.ok) toast.error(`${f.name}: ${json.error}`);
+        if (!json.ok) { toast.error(`${f.name}: ${json.error}`); continue; }
+        okCount++;
+        if (json.ocr) {
+          const o = json.ocr;
+          toast.success(`OCR: ${o.product_name || "(상품명 미인식)"} · ${o.total_amount ? o.total_amount.toLocaleString() + "원" : "금액?"} · ${o.trader_name || "거래자?"}`);
+        } else if (json.ocr_error) {
+          toast.warning(`${f.name}: OCR 실패(${json.ocr_error}) — 수동 입력 필요`);
+        }
       }
-      toast.success(`${arr.length}건 증빙 업로드`);
+      if (okCount) toast.success(`${okCount}건 증빙 업로드 완료`);
       fetchProofs();
     } finally {
       setBusy(false);
+    }
+  };
+
+  // 증빙 활성화 시 매핑 추천 자동 조회 + 추천 재고 자동 체크
+  const activateProof = async (proofId: string) => {
+    setActiveProof(proofId);
+    setSuggestion(null);
+    setSelectedRegs(new Set());
+    setSuggesting(true);
+    try {
+      const params = new URLSearchParams({ proof_id: proofId });
+      if (supplier) params.set("supplier", supplier);
+      const res = await fetch(`/api/proof/suggest?${params}`, { headers: AUTH });
+      const json = await res.json();
+      if (json.ok) {
+        setSuggestion(json as Suggestion);
+        if (json.recommended_ids?.length) setSelectedRegs(new Set<string>(json.recommended_ids));
+      }
+    } finally {
+      setSuggesting(false);
     }
   };
 
@@ -116,6 +154,8 @@ export function VivaconProofPanel() {
       if (!json.ok) { toast.error("연결 실패: " + json.error); return; }
       toast.success(`${json.linked}건 연결`);
       setSelectedRegs(new Set());
+      setSuggestion(null);
+      setActiveProof(null);
       await Promise.all([fetchProofs(), fetchInventory()]);
     } finally {
       setBusy(false);
@@ -274,17 +314,19 @@ export function VivaconProofPanel() {
             const matched = amt != null && p.linked_count > 0 && amt === p.linked_cost;
             const mismatch = amt != null && p.linked_count > 0 && amt !== p.linked_cost;
             return (
-            <div key={p.id} role="button" tabIndex={0} onClick={() => setActiveProof(p.id)}
-              onKeyDown={(e) => e.key === "Enter" && setActiveProof(p.id)}
+            <div key={p.id} role="button" tabIndex={0} onClick={() => activateProof(p.id)}
+              onKeyDown={(e) => e.key === "Enter" && activateProof(p.id)}
               className={cn("flex w-full cursor-pointer gap-3 rounded-xl border p-2 text-left", activeProof === p.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border hover:bg-secondary/30")}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.image_url} alt="증빙" className="h-24 w-20 rounded border border-border object-cover" />
               <div className="min-w-0 flex-1 text-xs">
                 <div className="flex items-center gap-1">
                   <span className="font-medium">{p.platform} {p.trader_name && `· ${p.trader_name}`}</span>
+                  {p.trade_type && <span className="rounded bg-secondary px-1 text-[10px] text-muted-foreground">{p.trade_type}</span>}
                   <button onClick={(e) => { e.stopPropagation(); deleteProof(p.id); }} title="증빙 삭제"
                     className="ml-auto text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
+                {p.ocr_product_name && <div className="truncate font-medium text-foreground/80" title={p.ocr_product_name}>🏷 {p.ocr_product_name}</div>}
                 <div className="text-muted-foreground">{p.proof_date ?? "-"} · 거래금액 {amt?.toLocaleString() ?? "-"}원</div>
                 <div className="mt-1">연결 <strong className={p.linked_count ? "text-green-600" : "text-muted-foreground"}>{p.linked_count}건</strong>
                   {p.linked_count > 0 && <span className="text-muted-foreground"> · 매핑합계 {p.linked_cost.toLocaleString()}원</span>}
@@ -313,6 +355,36 @@ export function VivaconProofPanel() {
               <Link2 className="h-4 w-4" /> 활성 증빙에 {selectedRegs.size}건 연결
             </button>
           </div>
+
+          {/* 매핑 추천 배너 (증빙 활성화 시) */}
+          {activeProof && (suggesting || suggestion) && (
+            <div className={cn("rounded-xl border px-3 py-2 text-xs",
+              suggesting ? "border-border bg-secondary/30"
+                : suggestion && suggestion.recommended_ids.length === 0 ? "border-amber-300 bg-amber-50/60 dark:bg-amber-950/20"
+                : suggestion?.amount_matched ? "border-green-300 bg-green-50/60 dark:bg-green-950/20"
+                : "border-amber-300 bg-amber-50/60 dark:bg-amber-950/20")}>
+              {suggesting ? (
+                <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> 추천 매핑 계산 중…</span>
+              ) : suggestion && suggestion.recommended_ids.length === 0 ? (
+                <span>🔍 <strong>{suggestion.proof_name}</strong> 와(과) 유사한 미연결 재고를 찾지 못했습니다. 수동으로 선택하세요.</span>
+              ) : suggestion ? (
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span>🔮 추천 <strong>{suggestion.recommended_ids.length}건</strong> 자동선택됨</span>
+                    {suggestion.amount_matched
+                      ? <span className="rounded bg-green-600/10 px-1.5 py-0.5 font-medium text-green-700 dark:text-green-400">✅ 금액일치</span>
+                      : <span className="rounded bg-amber-600/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-500">⚠️ 금액 확인필요</span>}
+                    {suggestion.recommended_ids.length > 1 && <span className="text-muted-foreground">(N:1 묶음)</span>}
+                  </div>
+                  <div className="text-muted-foreground">
+                    상위 후보: {suggestion.candidates.slice(0, 3).map((c) => `${c.product_name}(${Math.round(c.score * 100)}%)`).join(", ")}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">검수 후 위 <strong>{selectedRegs.size}건 연결</strong> 버튼을 누르세요. 체크박스로 가감 가능.</div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
           <div className="overflow-hidden rounded-xl border border-border">
             <table className="w-full text-xs">
               <thead className="border-b border-border bg-secondary/60">
