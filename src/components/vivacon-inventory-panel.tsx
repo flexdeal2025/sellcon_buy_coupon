@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { cn, toKST } from "@/lib/utils";
 import { toast } from "sonner";
-import { RefreshCw, Search, Pencil, X, Save } from "lucide-react";
+import { RefreshCw, Search, Pencil, X, Save, Trash2 } from "lucide-react";
 
 interface Coupon {
   id: string;
@@ -144,6 +144,26 @@ export function VivaconInventoryPanel() {
     });
   };
   const cancelEdit = () => { setEditId(null); setDraft({}); };
+
+  const deleteRow = async (r: Coupon) => {
+    if (r.status !== "available") {
+      toast.error(`삭제 불가 — 상태: ${r.status} (available 건만 삭제 가능)`); return;
+    }
+    if (!confirm(`[${r.상품명 ?? ""}] 쿠폰을 삭제합니다.\n발송기(B서버) 재고에서 즉시 제거됩니다. 계속할까요?`)) return;
+    try {
+      const res = await fetch(`/api/vivacon/coupon?id=${r.id}`, {
+        method: "DELETE", headers: { "x-app-passcode": PASSCODE },
+      });
+      const json = await res.json();
+      if (!json.ok) { toast.error("삭제 실패: " + json.error); return; }
+      setRows((prev) => prev.filter((x) => x.id !== r.id));
+      setTotal((t) => t - 1);
+      toast.success("삭제 완료");
+    } catch {
+      toast.error("삭제 중 오류");
+    }
+  };
+
   const saveEdit = async (id: string) => {
     if (!confirm("이 쿠폰 정보를 수정합니다.\n발송기(B서버)가 읽는 실제 재고이니 값을 확인하세요. 계속할까요?")) return;
     setSaving(true);
@@ -336,7 +356,7 @@ export function VivaconInventoryPanel() {
                     className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/40" />
                 </th>
               ))}
-              <th className="px-3 py-2 text-center text-xs">수정</th>
+              <th className="px-3 py-2 text-center text-xs">수정/삭제</th>
             </tr>
           </thead>
           <tbody>
@@ -377,9 +397,12 @@ export function VivaconInventoryPanel() {
                     </td>
                   );
                 })}
-                <td className="px-3 py-1.5 text-center">
-                  <button onClick={() => startEdit(r)} className="text-muted-foreground hover:text-primary" title="수정">
+                <td className="px-3 py-1.5 text-center whitespace-nowrap">
+                  <button onClick={() => startEdit(r)} className="text-muted-foreground hover:text-primary mr-2" title="수정">
                     <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => deleteRow(r)} className={cn("hover:text-destructive", r.status === "available" ? "text-muted-foreground" : "text-muted-foreground/30 cursor-not-allowed")} title={r.status === "available" ? "삭제" : `삭제 불가(${r.status})`}>
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </td>
               </tr>

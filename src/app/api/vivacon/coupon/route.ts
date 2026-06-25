@@ -8,6 +8,30 @@ import {
 
 export const runtime = "nodejs";
 
+// 단일 행 삭제 — available 상태만 허용 (allocated/exchanged 보호)
+export async function DELETE(req: Request) {
+  if (!checkAppPasscode(req)) {
+    return NextResponse.json({ ok: false, error: "인증 실패" }, { status: 401 });
+  }
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ ok: false, error: "id 필요" }, { status: 400 });
+  try {
+    const sb = getVivaconSupabase();
+    const { data: row, error: fetchErr } = await sb
+      .from("coupon_codes").select("id, status").eq("id", id).single();
+    if (fetchErr || !row) return NextResponse.json({ ok: false, error: "항목 없음" }, { status: 404 });
+    const status = (row as { id: string; status: string | null }).status;
+    if (status !== "available") {
+      return NextResponse.json({ ok: false, error: `삭제 불가 — 현재 상태: ${status} (available 건만 삭제 가능)` }, { status: 400 });
+    }
+    const { error } = await sb.from("coupon_codes").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "삭제 실패" }, { status: 500 });
+  }
+}
+
 // 단일 행 수정
 export async function PATCH(req: Request) {
   if (!checkAppPasscode(req)) {
