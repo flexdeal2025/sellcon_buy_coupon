@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase/server";
-import { uploadOcrImage } from "@/lib/gcp/storage";
-import { ocrGifticon } from "@/lib/ocr/gemini";
+import { uploadOcrImage, uploadProofImage } from "@/lib/gcp/storage";
+import { ocrGifticon, ocrPurchaseProof } from "@/lib/ocr/gemini";
+import { suggestMatches } from "@/lib/proof-match";
 import { resolveOptionName, DEFAULT_OPTION } from "@/lib/option-map";
 
 export const runtime = "nodejs";
@@ -264,17 +265,49 @@ export async function POST(req: Request) {
       await reply("🔢 코드형 선택됨.\n다음: 'YYMMDD 매입처'를 보낸 뒤, '코드\\n상품명\\nYYMMDD'로 코드를 등록하세요.\n→ 코드형 재고로 등록됩니다.");
       return NextResponse.json({ ok: true, mode: "code" });
     }
+    // ── 증빙 모드: 당근 거래내역 캡쳐 → OCR 적재 + 추천 매핑 회신 ──
+    if (/^(증빙|증빙모드)$/i.test(text) && chatId != null) {
+      await sb.from("telegram_ingest_context").upsert({
+        chat_id: String(chatId), storage_mode: "proof", code_mode: false,
+        updated_at: new Date().toISOString(),
+      });
+      await reply("🧾 증빙 모드 선택됨.\n당근 '상세 내역' 캡쳐를 올리면 자동 추출 후 추천 매핑을 회신합니다.\n추천이 맞으면 '확인', 건너뛰려면 '스킵'.\n💡 매입처를 좁히려면 'YYMMDD 매입처'를 먼저 보내세요.");
+      return NextResponse.json({ ok: true, mode: "proof" });
+    }
+    // ── 증빙 추천 확정/건너뛰기 ──
+    if (/^(확인|연결|ok)$/i.test(text) && chatId != null) {
+      const { data: ctx } = await sb.from("telegram_ingest_context").select("*").eq("chat_id", String(chatId)).maybeSingle();
+      const pid = (ctx?.pending_proof_id as string | undefined) ?? "";
+      const linkIds = (ctx?.pending_link_ids as string[] | undefined) ?? [];
+      if (!pid || linkIds.length === 0) {
+        await reply("확인할 추천 연결이 없습니다. 먼저 증빙 캡쳐를 올려주세요.");
+        return NextResponse.json({ ok: true });
+      }
+      const payload = linkIds.map((rid) => ({ proof_id: pid, registration_id: rid }));
+      const { error: le } = await sb.from("proof_registration_links").upsert(payload, { onConflict: "registration_id" });
+      if (le) { await reply("⚠️ 연결 실패: " + le.message); return NextResponse.json({ ok: true }); }
+      try { await sb.from("telegram_ingest_context").update({ pending_proof_id: null, pending_link_ids: [] }).eq("chat_id", String(chatId)); } catch { /* noop */ }
+      await reply(`✅ ${linkIds.length}건 증빙 연결 완료. 다음 증빙 캡쳐를 올리세요.`);
+      return NextResponse.json({ ok: true, linked: linkIds.length });
+    }
+    if (/^(스킵|건너뛰기|skip)$/i.test(text) && chatId != null) {
+      try { await sb.from("telegram_ingest_context").update({ pending_proof_id: null, pending_link_ids: [] }).eq("chat_id", String(chatId)); } catch { /* noop */ }
+      await reply("⏭️ 추천 매핑을 건너뛰었습니다. (증빙은 적재됨 — 웹 '증빙 매핑'에서 수동 연결 가능)");
+      return NextResponse.json({ ok: true, skipped: true });
+    }
     // 도움말: /help · /start · 도움말 · help · ? (그룹의 /help@봇이름 형태도 허용)
     if (/^(\/(help|start)(@\w+)?|도움말|help|\?)$/i.test(text)) {
       await reply(
         "📖 수집 봇 사용법 (순서대로)\n\n" +
-        "1️⃣ 저장형식 선택: '이미지형' 또는 '코드형'\n\n" +
+        "1️⃣ 저장형식 선택: '이미지형' / '코드형' / '증빙'\n\n" +
         "2️⃣ 매입 설정: 'YYMMDD 매입처' (예: 260623 당근)\n\n" +
         "3️⃣ 수집:\n" +
         "   • 이미지형 → 쿠폰 이미지 업로드 (AI OCR → 검수대기)\n" +
-        "   • 코드형 → '코드\\n상품명(부분 OK)\\n유효기간(YYMMDD)' 보낸 뒤 코드 줄바꿈 전송\n\n" +
+        "   • 코드형 → '코드\\n상품명(부분 OK)\\n유효기간(YYMMDD)' 보낸 뒤 코드 줄바꿈 전송\n" +
+        "   • 증빙 → 당근 '상세 내역' 캡쳐 업로드 (자동추출 + 추천 매핑)\n" +
+        "       추천이 맞으면 '확인', 아니면 '스킵'\n\n" +
         "🔚 종료: '종료'/'끝' · ↩️ 취소: '취소'(직전 묶음 삭제)\n" +
-        "💡 형식을 바꾸려면 '이미지형'/'코드형' 다시 전송\n" +
+        "💡 형식을 바꾸려면 '이미지형'/'코드형'/'증빙' 다시 전송\n" +
         "💡 매입처가 바뀌면 새로 'YYMMDD 매입처' 전송\n" +
         "💡 이 도움말 다시 보기: /help"
       );
@@ -364,8 +397,18 @@ export async function POST(req: Request) {
       // 저장형식 미선택이면 배치 생성 보류(이미지/코드 라벨 확정 필요)
       const { data: pre } = await sb.from("telegram_ingest_context").select("storage_mode").eq("chat_id", String(chatId)).maybeSingle();
       const mode = (pre?.storage_mode as string) ?? "";
+      // 증빙 모드: 배치 없이 매입처/매입일만 설정(추천 매핑 범위 좁힘용)
+      if (mode === "proof") {
+        const v = await resolveVendor(sb, ctx.supplier);
+        await sb.from("telegram_ingest_context").upsert({
+          chat_id: String(chatId), purchase_date: ctx.purchaseDate, supplier: v.name, updated_at: new Date().toISOString(),
+        });
+        const tag = !ctx.supplier ? "" : v.matched ? (v.fuzzy ? ` (입력 '${ctx.supplier}' → 매칭)` : "") : " ⚠️ 마스터 미등록";
+        await reply(`📌 증빙 매핑 범위: ${ctx.purchaseDate}${v.name ? ` · ${v.name}` : ""}${tag}\n이제 당근 거래내역 캡쳐를 올려주세요.`);
+        return NextResponse.json({ ok: true, context: true, mode: "proof" });
+      }
       if (mode !== "image" && mode !== "code") {
-        await reply("먼저 저장형식을 선택하세요 — '이미지형' 또는 '코드형'.");
+        await reply("먼저 저장형식을 선택하세요 — '이미지형' / '코드형' / '증빙'.");
         return NextResponse.json({ ok: true, held: "no-mode" });
       }
       const v = await resolveVendor(sb, ctx.supplier);
@@ -409,6 +452,101 @@ export async function POST(req: Request) {
       const { data: smRow } = await sb.from("telegram_ingest_context").select("*").eq("chat_id", String(chatId)).maybeSingle();
       storageMode = (smRow?.storage_mode as string) ?? "";
     }
+
+    // ── 증빙 모드: 당근 거래내역 캡쳐 → OCR 적재 + 추천 매핑 회신 ──
+    if (storageMode === "proof") {
+      // 파일 다운로드
+      const gf = await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)).json();
+      const filePath = gf?.result?.file_path;
+      if (!filePath) { await reply("⚠️ 파일을 가져오지 못했어요."); return NextResponse.json({ ok: true }); }
+      const buf = Buffer.from(await (await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`)).arrayBuffer());
+      const isPng = filePath.toLowerCase().endsWith(".png");
+      const mime = isPng ? "image/png" : "image/jpeg";
+
+      // OCR (실패해도 적재는 진행 → 웹에서 보정)
+      let pocr: Awaited<ReturnType<typeof ocrPurchaseProof>>["result"] | null = null;
+      let pocrErr = "";
+      try { ({ result: pocr } = await ocrPurchaseProof(buf.toString("base64"), mime)); }
+      catch (e) { pocrErr = e instanceof Error ? e.message : "OCR 실패"; }
+
+      // 거래번호 중복 차단(같은 증빙 재전송)
+      if (pocr?.trade_no) {
+        const { data: dup } = await sb.from("purchase_proofs").select("id").eq("trade_no", pocr.trade_no).limit(1);
+        if (dup?.length) {
+          await reply(`🧾 이미 등록된 거래번호(${pocr.trade_no}) — 중복 증빙이라 건너뜁니다.`);
+          return NextResponse.json({ ok: true, duplicate: true });
+        }
+      }
+
+      // GCP 업로드 (웹과 동일 proof/ 경로 규칙)
+      const ymdP = ymdOf(null);
+      const destPathP = `proof/${ymdP}/${crypto.randomUUID()}.${isPng ? "png" : "jpg"}`;
+      await uploadProofImage(destPathP, buf, mime);
+
+      // 증빙 행 적재 (기본 컬럼) + OCR 부가 컬럼 분리 저장
+      const { data: pf, error: pe } = await sb.from("purchase_proofs").insert({
+        platform: pocr?.platform ?? "당근마켓",
+        trader_name: pocr?.trader_name ?? "",
+        proof_date: pocr?.proof_date || null,
+        amount: pocr?.total_amount || null,
+        image_path: destPathP,
+        memo: "",
+      }).select("id").single();
+      if (pe) { await reply("⚠️ 증빙 적재 실패: " + pe.message); return NextResponse.json({ ok: true }); }
+      if (pocr) {
+        try {
+          await sb.from("purchase_proofs").update({
+            trade_type: pocr.trade_type, ocr_product_name: pocr.product_name,
+            product_amount: pocr.product_amount || null, trade_no: pocr.trade_no || null,
+            ocr_confidence: pocr.confidence,
+          }).eq("id", pf.id);
+        } catch { /* 부가 컬럼 미생성 — 무시 */ }
+      }
+
+      // OCR 상품명 없으면 추천 불가 — 적재만 안내
+      if (!pocr?.product_name) {
+        await reply(`🧾 증빙 적재됨${pocrErr ? ` (OCR 실패: ${pocrErr})` : " (상품명 미인식)"}.\n웹 '증빙 매핑'에서 수동 연결하세요.`);
+        return NextResponse.json({ ok: true, proof: pf.id });
+      }
+
+      // 미연결 재고 후보 로드 (매입처 컨텍스트 있으면 좁힘)
+      let rq = sb.from("stock_registrations")
+        .select("id,product_name,option_name,unit_cost,coupon_code,expiry_date,created_at,purchase_date")
+        .order("created_at", { ascending: true });
+      if (supplier) rq = rq.eq("supplier", supplier);
+      const { data: regs } = await rq;
+      const ids = (regs ?? []).map((r) => r.id);
+      const linked = new Set<string>();
+      if (ids.length) {
+        const { data: links } = await sb.from("proof_registration_links").select("registration_id").in("registration_id", ids);
+        for (const l of links ?? []) linked.add(l.registration_id);
+      }
+      const unmapped = (regs ?? []).filter((r) => !linked.has(r.id));
+      const sug = suggestMatches({
+        proof_product_name: pocr.product_name,
+        proof_date: pocr.proof_date || null,
+        total_amount: pocr.total_amount || null,
+        product_amount: pocr.product_amount || pocr.total_amount || null,
+        registrations: unmapped,
+      });
+
+      const amtStr = pocr.total_amount ? `${pocr.total_amount.toLocaleString()}원` : "금액?";
+      const head = `🧾 증빙: ${pocr.product_name} · ${amtStr}${pocr.trader_name ? ` · ${pocr.trader_name}` : ""}`;
+      if (sug.recommended_ids.length === 0) {
+        try { await sb.from("telegram_ingest_context").update({ pending_proof_id: null, pending_link_ids: [] }).eq("chat_id", String(chatId)); } catch { /* noop */ }
+        await reply(`${head}\n🔍 유사한 미연결 재고를 못 찾았습니다 — 웹 '증빙 매핑'에서 수동 연결하세요.`);
+        return NextResponse.json({ ok: true, proof: pf.id, recommended: 0 });
+      }
+      // 추천 보관 → '확인' 대기
+      try { await sb.from("telegram_ingest_context").update({ pending_proof_id: pf.id, pending_link_ids: sug.recommended_ids }).eq("chat_id", String(chatId)); }
+      catch { await reply("⚠️ '확인' 기능에 마이그레이션 필요(schema_telegram_proof.sql). 웹에서 연결하세요."); return NextResponse.json({ ok: true, proof: pf.id }); }
+      const top = sug.candidates.slice(0, 3).map((c) => `${c.product_name}(${Math.round(c.score * 100)}%)`).join(", ");
+      const matchTag = sug.amount_matched ? "✅금액일치" : "⚠️금액확인필요";
+      const nTag = sug.recommended_ids.length > 1 ? ` (N:1 ${sug.recommended_ids.length}건 묶음)` : "";
+      await reply(`${head}\n🔮 추천 ${sug.recommended_ids.length}건${nTag} ${matchTag}\n후보: ${top}\n→ 맞으면 '확인', 아니면 '스킵' (웹에서 직접 연결)`);
+      return NextResponse.json({ ok: true, proof: pf.id, recommended: sug.recommended_ids.length });
+    }
+
     if (storageMode !== "image") {
       await reply(storageMode === "code"
         ? "🔢 코드형 모드입니다 — 이미지 대신 '코드\\n상품명\\nYYMMDD'로 등록하거나, 이미지형으로 바꾸려면 '이미지형'을 보내세요."
