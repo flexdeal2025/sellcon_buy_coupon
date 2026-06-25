@@ -14,7 +14,7 @@ type TabType = "image" | "code" | "image_done" | "code_done";
 const TABS: { key: TabType; label: string }[] = [
   { key: "image", label: "이미지형" },
   { key: "code", label: "코드형" },
-  { key: "image_done", label: "이미지형 (발행이력)" },
+  { key: "image_done", label: "이미지형 (판매완료)" },
   { key: "code_done", label: "코드형 (판매완료)" },
 ];
 
