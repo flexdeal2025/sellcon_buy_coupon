@@ -36,11 +36,12 @@ export async function GET(req: Request) {
 
     if (type === "code" || type === "code_done") {
       const vc = getVivaconSupabase();
-      const status = type === "code" ? "available" : "exchanged";
+      // 판매완료 = allocated(고객 할당) + exchanged(교환 처리) 둘 다
+      const statuses = type === "code" ? ["available"] : ["allocated", "exchanged"];
       const { data, error } = await vc
         .from("coupon_codes")
-        .select("id, 상품명, 옵션명, coupon_code, expiry_date, status, 매입원가")
-        .eq("status", status)
+        .select("id, 상품명, 옵션명, coupon_code, expiry_date, status, 매입원가, allocated_at")
+        .in("status", statuses)
         .eq("expiry_yymmdd", date)
         .ilike("상품명", product)
         .order("expiry_date", { ascending: true })
