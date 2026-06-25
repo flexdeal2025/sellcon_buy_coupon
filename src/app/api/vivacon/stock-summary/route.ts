@@ -60,11 +60,12 @@ export async function GET(req: Request) {
       }));
     } else if (type === "code" || type === "code_done") {
       const vc = getVivaconSupabase();
-      const status = type === "code" ? "available" : "exchanged";
+      // 판매완료 = allocated(고객 할당) + exchanged(교환 처리) 둘 다
+      const statuses = type === "code" ? ["available"] : ["allocated", "exchanged"];
       const { data, error } = await vc
         .from("coupon_codes")
         .select("상품명, expiry_yymmdd")
-        .eq("status", status)
+        .in("status", statuses)
         .limit(10000);
       if (error) throw new Error(error.message);
 
