@@ -17,38 +17,44 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
     const [{ data: regs, error: e1 }, { data: links, error: e2 }] = await Promise.all([
-      sb.from("stock_registrations").select("id, supplier, created_at, unit_cost"),
+      sb.from("stock_registrations").select("id, supplier, created_at, unit_cost, source"),
       sb.from("proof_registration_links").select("registration_id"),
     ]);
     if (e1) throw new Error(e1.message);
     if (e2) throw new Error(e2.message);
 
     const linked = new Set((links ?? []).map((l) => l.registration_id));
+    // 셀콘(A경로)은 회원·정산·금액 정보가 시스템에 보존 → 별도 증빙 불필요(시스템 증빙)
+    const isSystemProof = (source: string | null | undefined) => source === "sellcon";
+
     // 등록일(created_at) 기준 집계 — 증빙 화면 날짜필터(등록일)와 동일 기준
-    // 금액은 입력된 매입원가(unit_cost) 기준. missingAmt = 증빙 미연결 매입액(소명 리스크 금액)
-    interface Agg { supplier: string; date: string; total: number; mapped: number; totalAmt: number; missingAmt: number }
+    // 금액은 입력된 매입원가(unit_cost) 기준. missingAmt = 증빙 미확보 매입액(소명 리스크 금액)
+    interface Agg { supplier: string; date: string; total: number; mapped: number; system: number; totalAmt: number; missingAmt: number }
     const map = new Map<string, Agg>();
     for (const r of regs ?? []) {
       const supplier = r.supplier || "(미지정)";
       const date = kstDate(r.created_at);
       const cost = Number(r.unit_cost) || 0;
       const key = `${supplier}__${date}`;
-      const cur = map.get(key) ?? { supplier, date, total: 0, mapped: 0, totalAmt: 0, missingAmt: 0 };
+      const cur = map.get(key) ?? { supplier, date, total: 0, mapped: 0, system: 0, totalAmt: 0, missingAmt: 0 };
       cur.total++;
       cur.totalAmt += cost;
       if (linked.has(r.id)) cur.mapped++;
-      else cur.missingAmt += cost;
+      else if (isSystemProof(r.source)) cur.system++;   // 셀콘 시스템 증빙 → 누락 아님
+      else cur.missingAmt += cost;                       // 진짜 증빙 미확보만 리스크 금액
       map.set(key, cur);
     }
     const rows = Array.from(map.values())
-      .map((r) => ({ ...r, missing: r.total - r.mapped }))
+      // 미연결(missing) = 전체 − 이미지증빙연결 − 시스템증빙(셀콘)
+      .map((r) => ({ ...r, missing: r.total - r.mapped - r.system }))
       .sort((a, b) => (b.date.localeCompare(a.date)) || a.supplier.localeCompare(b.supplier));
 
-    // 총 미연결 매입액(증빙 없는 매입 합계) — 소명 리스크 가시화
+    // 총 미확보 매입액(증빙 없는 매입 합계, 셀콘 제외) — 소명 리스크 가시화
     const missingAmtTotal = rows.reduce((s, r) => s + r.missingAmt, 0);
     const missingCntTotal = rows.reduce((s, r) => s + r.missing, 0);
+    const systemCntTotal = rows.reduce((s, r) => s + r.system, 0);
 
-    return NextResponse.json({ ok: true, rows, missingAmtTotal, missingCntTotal });
+    return NextResponse.json({ ok: true, rows, missingAmtTotal, missingCntTotal, systemCntTotal });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "리포트 실패" }, { status: 500 });
   }

@@ -24,6 +24,7 @@ interface Reg {
   id: string; product_name: string; option_name: string; coupon_code: string;
   expiry_date: string | null; supplier: string; stored_as_code: boolean; published: boolean;
   proof_id: string | null; created_at: string | null; purchase_date: string | null;
+  source?: string | null;
 }
 
 export function VivaconProofPanel() {
@@ -47,10 +48,11 @@ export function VivaconProofPanel() {
   const [amount, setAmount] = useState("");
 
   // 누락 리포트
-  interface ReportRow { supplier: string; date: string; total: number; mapped: number; missing: number; totalAmt: number; missingAmt: number }
+  interface ReportRow { supplier: string; date: string; total: number; mapped: number; system: number; missing: number; totalAmt: number; missingAmt: number }
   const [report, setReport] = useState<ReportRow[]>([]);
   const [reportMissingAmt, setReportMissingAmt] = useState(0);
   const [reportMissingCnt, setReportMissingCnt] = useState(0);
+  const [reportSystemCnt, setReportSystemCnt] = useState(0);
   const [showReport, setShowReport] = useState(false);
   const loadReport = async () => {
     const res = await fetch("/api/proof/report");
@@ -59,6 +61,7 @@ export function VivaconProofPanel() {
       setReport(json.rows);
       setReportMissingAmt(json.missingAmtTotal ?? 0);
       setReportMissingCnt(json.missingCntTotal ?? 0);
+      setReportSystemCnt(json.systemCntTotal ?? 0);
       setShowReport(true);
     } else toast.error("리포트 실패: " + json.error);
   };
@@ -226,7 +229,11 @@ export function VivaconProofPanel() {
     ? inventory.filter((r) => toKST(r.created_at, true) === dateFilter)
     : inventory;
   const total = displayedInventory.length;
+  // 셀콘(A경로)은 시스템 자체 증빙 → 증빙 확보로 간주
+  const isSystemProof = (r: Reg) => r.source === "sellcon";
   const mapped = displayedInventory.filter((r) => r.proof_id).length;
+  const systemCovered = displayedInventory.filter((r) => !r.proof_id && isSystemProof(r)).length;
+  const unmappedReal = total - mapped - systemCovered;
 
   return (
     <div className="space-y-4">
@@ -245,7 +252,7 @@ export function VivaconProofPanel() {
           <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" title="등록일 기준" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
           {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-muted-foreground hover:text-foreground">날짜해제</button>}
         </div>
-        <span className="text-sm">재고 <strong>{total}</strong> · 증빙연결 <strong className="text-green-600">{mapped}</strong> · 미연결 <strong className="text-amber-600">{total - mapped}</strong></span>
+        <span className="text-sm">재고 <strong>{total}</strong> · 증빙연결 <strong className="text-green-600">{mapped}</strong>{systemCovered > 0 && <> · 시스템증빙 <strong className="text-blue-600">{systemCovered}</strong></>} · 미연결 <strong className="text-amber-600">{unmappedReal}</strong></span>
         <button onClick={loadReport} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">누락 리포트</button>
         <button onClick={() => { fetchProofs(); fetchInventory(); }} className="ml-auto rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>
       </div>
@@ -263,6 +270,12 @@ export function VivaconProofPanel() {
               <span className="ml-1 text-muted-foreground">(입력된 매입원가 기준 — 국세청 소명 리스크 금액)</span>
             </div>
           )}
+          {reportSystemCnt > 0 && (
+            <div className="border-b border-border bg-blue-50/50 px-3 py-1.5 text-xs dark:bg-blue-950/20">
+              셀콘 시스템 증빙 <strong className="text-blue-700 dark:text-blue-400">{reportSystemCnt}건</strong>
+              <span className="ml-1 text-muted-foreground">(회원·정산·금액 정보가 시스템에 보존 — 별도 증빙 불필요, 누락 제외)</span>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="border-b border-border bg-secondary/30">
@@ -271,12 +284,13 @@ export function VivaconProofPanel() {
                   <th className="px-3 py-1.5 text-left">등록일</th>
                   <th className="px-3 py-1.5 text-right">전체</th>
                   <th className="px-3 py-1.5 text-right">연결</th>
+                  <th className="px-3 py-1.5 text-right">시스템증빙</th>
                   <th className="px-3 py-1.5 text-right">미연결</th>
                   <th className="px-3 py-1.5 text-right">미연결금액</th>
                 </tr>
               </thead>
               <tbody>
-                {report.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
+                {report.length === 0 && <tr><td colSpan={7} className="py-4 text-center text-muted-foreground">데이터 없음</td></tr>}
                 {report.map((r) => {
                   const validDate = /^\d{4}-\d{2}-\d{2}$/.test(r.date);
                   const applyFilter = () => {
@@ -292,6 +306,7 @@ export function VivaconProofPanel() {
                     <td className="px-3 py-1.5 whitespace-nowrap">{r.date}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{r.total}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-green-600">{r.mapped}</td>
+                    <td className={cn("px-3 py-1.5 text-right tabular-nums", r.system > 0 ? "text-blue-600" : "text-muted-foreground")}>{r.system > 0 ? r.system : "-"}</td>
                     <td className={cn("px-3 py-1.5 text-right tabular-nums font-medium", r.missing > 0 ? "text-amber-600" : "text-muted-foreground")}>{r.missing}</td>
                     <td className={cn("px-3 py-1.5 text-right tabular-nums", r.missingAmt > 0 ? "font-medium text-amber-600" : "text-muted-foreground")}>{r.missingAmt > 0 ? r.missingAmt.toLocaleString() : "-"}</td>
                   </tr>
@@ -433,10 +448,16 @@ export function VivaconProofPanel() {
                 </tr>
               </thead>
               <tbody>
-                {displayedInventory.map((r) => (
-                  <tr key={r.id} className={cn("border-b border-border/50", r.proof_id ? "bg-green-50/30 dark:bg-green-950/10" : "hover:bg-secondary/30")}>
+                {displayedInventory.map((r) => {
+                  const sys = !r.proof_id && isSystemProof(r);
+                  return (
+                  <tr key={r.id} className={cn("border-b border-border/50",
+                    r.proof_id ? "bg-green-50/30 dark:bg-green-950/10"
+                      : sys ? "bg-blue-50/30 dark:bg-blue-950/10"
+                      : "hover:bg-secondary/30")}>
                     <td className="px-2 py-1.5">
-                      <input type="checkbox" checked={selectedRegs.has(r.id)} disabled={!!r.proof_id}
+                      <input type="checkbox" checked={selectedRegs.has(r.id)} disabled={!!r.proof_id || sys}
+                        title={sys ? "셀콘 시스템 증빙 — 별도 연결 불필요" : undefined}
                         onChange={(e) => setSelectedRegs((p) => { const s = new Set(p); e.target.checked ? s.add(r.id) : s.delete(r.id); return s; })} />
                     </td>
                     <td className="px-2 py-1.5 truncate max-w-32" title={r.product_name}>{r.product_name}{r.option_name && ` (${r.option_name})`}</td>
@@ -449,10 +470,13 @@ export function VivaconProofPanel() {
                         <button onClick={() => unlink(r.id)} title="연결 해제" className="inline-flex items-center gap-0.5 text-green-600 hover:text-destructive">
                           <CheckCircle2 className="h-3.5 w-3.5" /><Unlink className="h-3 w-3" />
                         </button>
+                      ) : sys ? (
+                        <span className="text-[11px] text-blue-600" title="셀콘 시스템 증빙(회원·정산 정보 보존)">🔵 시스템</span>
                       ) : <span className="text-muted-foreground">–</span>}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {displayedInventory.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
               </tbody>
             </table>
