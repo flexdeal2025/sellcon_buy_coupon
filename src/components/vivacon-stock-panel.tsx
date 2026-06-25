@@ -649,13 +649,16 @@ export function VivaconStockPanel() {
               </div>
               <input list="vivacon-products" className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" placeholder="상품명(비바콘 검색)"
                 value={r.product_name} disabled={r.published}
-                onChange={(e) => { const v = e.target.value; updateRow(r.id, slugMap[v] ? { product_name: v, product_slug: slugMap[v] } : { product_name: v }); }} />
+                onChange={(e) => { const v = e.target.value; updateRow(r.id, slugMap[v] ? { product_name: v, product_slug: slugMap[v] } : { product_name: v }); }}
+                onBlur={(e) => { const v = e.target.value; if (v !== r.product_name) updateRow(r.id, slugMap[v] ? { product_name: v, product_slug: slugMap[v] } : { product_name: v }); }} />
               <input className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" placeholder="옵션명"
                 value={r.option_name} disabled={r.published} onChange={(e) => updateRow(r.id, { option_name: e.target.value })} />
               {/* 영문명(슬러그) — 이미지형 파일명에 사용 */}
               <div className="flex gap-1.5">
                 <input className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm font-mono" placeholder="영문명(파일명용)"
-                  value={r.product_slug ?? ""} disabled={r.published} onChange={(e) => updateRow(r.id, { product_slug: e.target.value })} />
+                  value={r.product_slug ?? ""} disabled={r.published}
+                  onChange={(e) => updateRow(r.id, { product_slug: e.target.value })}
+                  onBlur={(e) => { const v = e.target.value; if (v !== (r.product_slug ?? "")) updateRow(r.id, { product_slug: v }); }} />
                 {!r.published && (
                   <button onClick={() => genSlug(r)} title="AI 영문명 생성" className="flex shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-sm text-primary hover:bg-primary/10">
                     <Sparkles className="h-3 w-3" /> AI
