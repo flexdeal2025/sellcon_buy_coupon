@@ -20,58 +20,90 @@ const PROMPT = `이 모바일 상품권(기프티콘) 이미지에서 아래 항
 }
 못 읽는 항목은 빈 문자열("")로. 날짜는 반드시 YYYY-MM-DD 형식.`;
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 모델 응답 텍스트를 느슨하게 JSON 파싱: 마크다운 펜스 제거 + 첫 {…} 블록 추출 */
+function parseJsonLoose(text: string): Record<string, unknown> {
+  let t = (text ?? "").trim();
+  if (!t) throw new Error("빈 응답");
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim(); // ```json … ``` 제거
+  const s = t.indexOf("{");
+  const e = t.lastIndexOf("}");
+  if (s >= 0 && e > s) t = t.slice(s, e + 1); // 앞뒤 잡설 제거, 객체만
+  return JSON.parse(t) as Record<string, unknown>;
+}
+
+/**
+ * Gemini 비전 호출 → JSON 파싱 (공통). 빈 응답·펜스·다중 part·일시적 오류를 방어.
+ *  - thinkingBudget:0 → 2.5 계열이 추론에 출력토큰을 써 본문이 비는 문제 차단
+ *  - 파싱 실패 시 다음 시도로 재시도(마지막은 상위 모델 flash로 승급)
+ *  - 최종 실패 메시지에 finishReason/blockReason/응답 일부를 담아 진단 가능하게
+ */
+async function geminiVisionJson(
+  prompt: string,
+  imageBase64: string,
+  mimeType: string,
+): Promise<{ parsed: Record<string, unknown>; raw: unknown }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("GEMINI_API_KEY 미설정");
+  const models = [process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite", "gemini-2.5-flash"];
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
+    generationConfig: { response_mime_type: "application/json", thinkingConfig: { thinkingBudget: 0 } },
+  });
+
+  const MAX_TRIES = 3;
+  let lastErr = "알 수 없음";
+  for (let i = 0; i < MAX_TRIES; i++) {
+    const model = i < 2 ? models[0] : models[1];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    } catch (e) {
+      lastErr = `네트워크 오류: ${e instanceof Error ? e.message : "fetch"}`;
+      if (i < MAX_TRIES - 1) { await sleep(1500 * (i + 1)); continue; }
+      break;
+    }
+    if (!res.ok) {
+      if ((res.status === 429 || res.status === 503) && i < MAX_TRIES - 1) { await sleep(1500 * (i + 1)); continue; }
+      const t = await res.text().catch(() => "");
+      throw new Error(`Gemini 오류 (${res.status}): ${t.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    const cand = data?.candidates?.[0];
+    const parts = cand?.content?.parts;
+    const text: string = Array.isArray(parts)
+      ? parts.map((p: { text?: string }) => p?.text ?? "").join("").trim()
+      : "";
+    const finish = cand?.finishReason;
+    const block = data?.promptFeedback?.blockReason;
+    try {
+      return { parsed: parseJsonLoose(text), raw: data };
+    } catch {
+      lastErr = `JSON 아님${finish && finish !== "STOP" ? ` finish=${finish}` : ""}${block ? ` block=${block}` : ""}: ${(text || "(빈 응답)").slice(0, 120)}`;
+      if (i < MAX_TRIES - 1) { await sleep(1500 * (i + 1)); continue; }
+    }
+  }
+  throw new Error(`OCR 응답 파싱 실패 — ${lastErr}`);
+}
+
 export async function ocrGifticon(
   imageBase64: string,
   mimeType: string,
 ): Promise<{ result: OcrResult; raw: unknown }> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY 미설정");
-  const models = [
-    process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-  ];
-
-  const body = JSON.stringify({
-    contents: [
-      { parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] },
-    ],
-    generationConfig: { response_mime_type: "application/json" },
-  });
-
-  let res: Response | null = null;
-  const MAX_TRIES = 3;
-  for (let i = 0; i < MAX_TRIES; i++) {
-    const model = i < 2 ? models[0] : models[1];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    if (res.ok || (res.status !== 429 && res.status !== 503)) break;
-    if (i < MAX_TRIES - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
-  }
-
-  if (!res?.ok) {
-    const t = await res?.text().catch(() => "") ?? "";
-    throw new Error(`Gemini 오류 (${res?.status}): ${t.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  let parsed: Partial<OcrResult> = {};
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error("OCR 응답 파싱 실패");
-  }
-
-  const expiry = String(parsed.expiry_date ?? "").trim();
+  const { parsed, raw } = await geminiVisionJson(PROMPT, imageBase64, mimeType);
+  const p = parsed as Partial<OcrResult>;
+  const expiry = String(p.expiry_date ?? "").trim();
   return {
     result: {
-      product_name: String(parsed.product_name ?? "").trim(),
-      coupon_code: String(parsed.coupon_code ?? "").replace(/\s+/g, "").trim(),
+      product_name: String(p.product_name ?? "").trim(),
+      coupon_code: String(p.coupon_code ?? "").replace(/\s+/g, "").trim(),
       expiry_date: /^\d{4}-\d{2}-\d{2}$/.test(expiry) ? expiry : "",
-      exchange_location: String(parsed.exchange_location ?? "").trim(),
-      confidence: Number(parsed.confidence ?? 0) || 0,
+      exchange_location: String(p.exchange_location ?? "").trim(),
+      confidence: Number(p.confidence ?? 0) || 0,
     },
-    raw: data,
+    raw,
   };
 }
 
@@ -118,33 +150,7 @@ export async function ocrPurchaseProof(
   imageBase64: string,
   mimeType: string,
 ): Promise<{ result: ProofOcrResult; raw: unknown }> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY 미설정");
-  const models = [process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite", "gemini-2.5-flash"];
-
-  const body = JSON.stringify({
-    contents: [{ parts: [{ text: PROOF_PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
-    generationConfig: { response_mime_type: "application/json" },
-  });
-
-  let res: Response | null = null;
-  const MAX_TRIES = 3;
-  for (let i = 0; i < MAX_TRIES; i++) {
-    const model = i < 2 ? models[0] : models[1];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    if (res.ok || (res.status !== 429 && res.status !== 503)) break;
-    if (i < MAX_TRIES - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
-  }
-  if (!res?.ok) {
-    const t = (await res?.text().catch(() => "")) ?? "";
-    throw new Error(`Gemini 오류 (${res?.status}): ${t.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  let p: Record<string, unknown> = {};
-  try { p = JSON.parse(text); } catch { throw new Error("증빙 OCR 응답 파싱 실패"); }
+  const { parsed: p, raw } = await geminiVisionJson(PROOF_PROMPT, imageBase64, mimeType);
 
   const num = (v: unknown) => {
     const n = Number(String(v ?? "").replace(/[^0-9]/g, ""));
@@ -152,7 +158,7 @@ export async function ocrPurchaseProof(
   };
   const dt = String(p.trade_datetime ?? "").trim();
   const dtMatch = dt.match(/^(\d{4}-\d{2}-\d{2})/);
-  const raw = String(p.product_name_raw ?? "").trim();
+  const rawName = String(p.product_name_raw ?? "").trim();
   const total = num(p.total_amount);
   const prodAmt = num(p.product_amount);
 
@@ -160,8 +166,8 @@ export async function ocrPurchaseProof(
     result: {
       platform: "당근마켓",
       trade_type: String(p.trade_type ?? "").trim(),
-      product_name_raw: raw,
-      product_name: cleanProofProductName(raw),
+      product_name_raw: rawName,
+      product_name: cleanProofProductName(rawName),
       trader_name: String(p.trader_name ?? "").trim(),
       proof_date: dtMatch ? dtMatch[1] : "",
       trade_datetime: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(dt) ? dt.slice(0, 16) : (dtMatch ? dtMatch[1] : ""),
@@ -170,7 +176,7 @@ export async function ocrPurchaseProof(
       trade_no: String(p.trade_no ?? "").trim(),
       confidence: Number(p.confidence ?? 0) || 0,
     },
-    raw: data,
+    raw,
   };
 }
 
