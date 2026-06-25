@@ -405,7 +405,8 @@ export function VivaconStockPanel() {
     try {
       const res = await fetch("/api/stock/option-name", {
         method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
-        body: JSON.stringify({ ids: targets.map((r) => r.id) }),
+        // 화면의 현재 옵션명을 함께 전송 → 미저장 편집(지운 상태 등)이 '빈 값' 판단에 반영됨
+        body: JSON.stringify({ items: targets.map((r) => ({ id: r.id, option_name: r.option_name ?? "" })) }),
       });
       const json = await res.json();
       if (!json.ok) { toast.error("자동채움 실패: " + (json.error ?? "")); return; }

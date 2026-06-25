@@ -12,9 +12,14 @@ export async function POST(req: Request) {
   if (!checkAppPasscode(req)) {
     return NextResponse.json({ ok: false, error: "인증 실패" }, { status: 401 });
   }
-  let body: { ids?: string[]; overwrite?: boolean };
+  // items: 화면의 현재 옵션명(미저장 편집 포함)을 함께 받아 '빈 값' 판단에 사용. (legacy: ids)
+  let body: { ids?: string[]; items?: { id: string; option_name?: string }[]; overwrite?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ ok: false, error: "invalid json" }, { status: 400 }); }
-  const ids = (body.ids ?? []).filter(Boolean);
+  const clientOpt = new Map<string, string>();
+  if (Array.isArray(body.items)) {
+    for (const it of body.items) if (it?.id) clientOpt.set(it.id, String(it.option_name ?? ""));
+  }
+  const ids = (body.items ? body.items.map((i) => i.id) : (body.ids ?? [])).filter(Boolean);
   if (ids.length === 0) return NextResponse.json({ ok: false, error: "ids 필요" }, { status: 400 });
   const overwrite = !!body.overwrite;
 
@@ -31,7 +36,9 @@ export async function POST(req: Request) {
     const updated: { id: string; option_name: string }[] = [];
     for (const r of rows) {
       if (r.published) continue;
-      if (!overwrite && (r.option_name ?? "").trim()) continue;
+      // 빈 값 판단: 클라이언트가 보낸 현재값(미저장 편집) 우선, 없으면 DB값
+      const currentOpt = clientOpt.has(r.id) ? clientOpt.get(r.id)! : (r.option_name ?? "");
+      if (!overwrite && currentOpt.trim()) continue;
       const product = (r.product_name ?? "").trim();
       if (!product) continue;
       let opt = cache.get(product);
