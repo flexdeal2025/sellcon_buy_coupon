@@ -23,7 +23,7 @@ const PROMPT = `이 모바일 상품권(기프티콘) 이미지에서 아래 항
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 모델 응답 텍스트를 느슨하게 JSON 파싱: 마크다운 펜스 제거 + 첫 {…} 블록 추출 */
-function parseJsonLoose(text: string): Record<string, unknown> {
+export function parseJsonLoose(text: string): Record<string, unknown> {
   let t = (text ?? "").trim();
   if (!t) throw new Error("빈 응답");
   t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim(); // ```json … ``` 제거
@@ -123,14 +123,15 @@ export interface ProofOcrResult {
   confidence: number;        // 0~100
 }
 
-/** 상품명 정제: [판매]/팝니다/기프티콘 등 거래 접두·접미사 제거 */
+/** 상품명 정제: [판매]/팝니다/기프티콘 등 거래 접두·접미사 제거.
+ *  한글은 \b(단어경계)가 동작하지 않으므로 사용하지 않는다. 접미사를 끝에서부터 반복 제거. */
 export function cleanProofProductName(raw: string): string {
-  return String(raw ?? "")
-    .replace(/\[[^\]]*\]/g, " ")                         // [판매] [삽니다] [급처] …
-    .replace(/(팝니다|삽니다|판매합니다|판매|구해요|구합니다)\s*$/g, " ")
-    .replace(/\b(기프티콘|교환권|모바일상품권|상품권|쿠폰)\s*$/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  let s = String(raw ?? "").replace(/\[[^\]]*\]/g, " ").trim(); // [판매] [삽니다] [급처] …
+  // 끝에 붙는 거래/유형 접미사를 반복적으로 제거 ("…기프티콘 팝니다" 같은 연쇄 대응)
+  const suffix = /(팝니다|삽니다|판매합니다|판매|구해요|구합니다|기프티콘|교환권|모바일상품권|상품권|쿠폰)\s*$/;
+  let prev = "";
+  while (prev !== s) { prev = s; s = s.replace(suffix, "").trim(); }
+  return s.replace(/\s+/g, " ").trim();
 }
 
 const PROOF_PROMPT = `이 이미지는 당근마켓(당근페이) 거래 "상세 내역" 화면이다. 아래 항목을 추출해 JSON으로만 답하라.
