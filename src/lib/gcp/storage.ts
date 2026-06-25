@@ -58,3 +58,30 @@ export async function copyOcrToPending(
   await client().bucket(OCR_BUCKET).file(ocrPath).copy(client().bucket(GIFTICON_BUCKET).file(dest));
   return dest;
 }
+
+/** GIFTICON_BUCKET의 pending/ 폴더를 스캔해 상품명별 이미지 재고를 집계.
+ *  경로 구조: pending/{상품명}/{YYMMDD}/{파일명}
+ */
+export async function listPendingStock(): Promise<
+  Array<{ product: string; count: number; dates: string[] }>
+> {
+  const [files] = await client()
+    .bucket(GIFTICON_BUCKET)
+    .getFiles({ prefix: "pending/", maxResults: 10000 });
+
+  const map = new Map<string, { count: number; dates: Set<string> }>();
+  for (const f of files) {
+    const parts = f.name.split("/");
+    // 실제 파일만: ['pending', 상품명, YYMMDD, 파일명] — 디렉터리 마커(trailing /) 제외
+    if (parts.length < 4 || !parts[3]) continue;
+    const product = parts[1];
+    const date = parts[2];
+    const cur = map.get(product) ?? { count: 0, dates: new Set<string>() };
+    cur.count++;
+    cur.dates.add(date);
+    map.set(product, cur);
+  }
+  return Array.from(map.entries())
+    .map(([product, v]) => ({ product, count: v.count, dates: Array.from(v.dates).sort() }))
+    .sort((a, b) => b.count - a.count);
+}

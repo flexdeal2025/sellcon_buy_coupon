@@ -1,16 +1,47 @@
+"use client";
+
+import { useState } from "react";
 import { VivaconInventoryPanel } from "@/components/vivacon-inventory-panel";
+import { VivaconStockSummaryPanel } from "@/components/vivacon-stock-summary-panel";
+
+type Tab = "overview" | "detail";
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: "overview", label: "재고 현황" },
+  { key: "detail", label: "코드 재고 상세" },
+];
 
 export default function VivaconPage() {
-  // 폭은 app-shell 이 라우트(/vivacon)에 맞춰 넓혀줌 → 헤더와 정렬 일치
+  const [tab, setTab] = useState<Tab>("overview");
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold">쿠폰재고 (비바콘)</h1>
         <p className="text-sm text-muted-foreground">
-          외주 비바콘 시스템의 코드형 쿠폰 재고를 직접 조회·수정합니다.
+          이미지형(GCP pending) + 코드형(비바콘 DB) 재고를 통합 조회합니다.
         </p>
       </div>
-      <VivaconInventoryPanel />
+
+      {/* 탭 바 */}
+      <div className="flex gap-1 border-b border-border">
+        {TABS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              tab === key
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "overview" && <VivaconStockSummaryPanel />}
+      {tab === "detail" && <VivaconInventoryPanel />}
     </div>
   );
 }
