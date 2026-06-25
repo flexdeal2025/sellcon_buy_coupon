@@ -288,11 +288,13 @@ export function VivaconStockPanel() {
     if (!confirm(`선택한 ${targets.length}건을 검수 취소(삭제)합니다.\n이미지도 함께 삭제되며 되돌릴 수 없습니다. 계속할까요?`)) return;
     setBusy(true);
     try {
-      const deleted = new Set<string>();
-      for (const r of targets) {
-        const res = await fetch(`/api/stock/registration?id=${r.id}`, { method: "DELETE", headers: AUTH });
-        if ((await res.json()).ok) deleted.add(r.id);
-      }
+      const results = await Promise.all(
+        targets.map(async (r) => {
+          const res = await fetch(`/api/stock/registration?id=${r.id}`, { method: "DELETE", headers: AUTH });
+          return (await res.json()).ok ? r.id : null;
+        })
+      );
+      const deleted = new Set(results.filter(Boolean) as string[]);
       setRows((prev) => prev.filter((x) => !deleted.has(x.id)));
       setSelected(new Set());
       toast.success(`${deleted.size}건 삭제 완료${deleted.size < targets.length ? ` / 실패 ${targets.length - deleted.size}` : ""}`);
@@ -308,14 +310,18 @@ export function VivaconStockPanel() {
     if (targets.length === 0) { toast.error("승인할 미승인 카드를 선택하세요"); return; }
     setBusy(true);
     try {
-      let ok = 0;
-      for (const r of targets) {
-        const res = await fetch("/api/stock/registration", {
-          method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
-          body: JSON.stringify({ id: r.id, patch: { inspection_status: "approved" } }),
-        });
-        if ((await res.json()).ok) { updateRow(r.id, { inspection_status: "approved" }); ok++; }
-      }
+      const results = await Promise.all(
+        targets.map(async (r) => {
+          const res = await fetch("/api/stock/registration", {
+            method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+            body: JSON.stringify({ id: r.id, patch: { inspection_status: "approved" } }),
+          });
+          const json = await res.json();
+          if (json.ok) updateRow(r.id, { inspection_status: "approved" });
+          return json.ok;
+        })
+      );
+      const ok = results.filter(Boolean).length;
       toast.success(`${ok}건 승인${ok < targets.length ? ` / 실패 ${targets.length - ok}` : ""}`);
     } finally {
       setBusy(false);
@@ -355,16 +361,20 @@ export function VivaconStockPanel() {
       : { [bulkField]: bulkValue };
     setBusy(true);
     try {
-      for (const r of targets) {
-        const res = await fetch("/api/stock/registration", {
-          method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
-          body: JSON.stringify({ id: r.id, patch }),
-        });
-        const json = await res.json();
-        if (json.ok) updateRow(r.id, json.row);
-      }
+      const results = await Promise.all(
+        targets.map(async (r) => {
+          const res = await fetch("/api/stock/registration", {
+            method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+            body: JSON.stringify({ id: r.id, patch }),
+          });
+          const json = await res.json();
+          if (json.ok) updateRow(r.id, json.row);
+          return json.ok;
+        })
+      );
+      const ok = results.filter(Boolean).length;
       const label = bulkField === "stored_as_code" ? (bulkValue === "code" ? "코드형" : "이미지형") + "으로 " : "";
-      toast.success(`${targets.length}건 ${label}일괄 변경 완료`);
+      toast.success(`${ok}건 ${label}일괄 변경 완료${ok < targets.length ? ` / 실패 ${targets.length - ok}` : ""}`);
     } finally {
       setBusy(false);
     }
@@ -673,16 +683,16 @@ export function VivaconStockPanel() {
                 </select>
                 {!r.published && (
                   <>
-                    <button onClick={() => saveRow(r)} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 hover:bg-secondary">
-                      <Save className="h-4 w-4" /> 저장
+                    <button onClick={() => saveRow(r)} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-muted-foreground hover:bg-secondary hover:text-foreground" title="저장만(승인 없이)">
+                      <Save className="h-4 w-4" />
                     </button>
                     {r.inspection_status === "approved" ? (
-                      <button onClick={() => setStatus(r, "pending")} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-amber-600">
+                      <button onClick={() => setStatus(r, "pending")} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-warning">
                         <RotateCcw className="h-4 w-4" /> 승인취소
                       </button>
                     ) : (
-                      <button onClick={() => setStatus(r, "approved")} className="flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/30 px-3 py-2 text-primary">
-                        <CheckCircle2 className="h-4 w-4" /> 승인
+                      <button onClick={() => setStatus(r, "approved")} className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground hover:bg-primary/90">
+                        <CheckCircle2 className="h-4 w-4" /> 저장·승인
                       </button>
                     )}
                   </>
