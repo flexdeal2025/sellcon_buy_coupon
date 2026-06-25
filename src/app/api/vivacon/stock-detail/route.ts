@@ -1,16 +1,9 @@
 import { NextResponse } from "next/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
-import { getServerSupabase } from "@/lib/supabase/server";
-import { listPendingFiles, getSignedReadUrl, GIFTICON_BUCKET } from "@/lib/gcp/storage";
+import { listPendingFiles, listCompletedFiles, getSignedReadUrl, GIFTICON_BUCKET } from "@/lib/gcp/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
-
-/** YYMMDD → "2026-07-31" */
-function yymmddToDate(s: string): string {
-  if (!/^\d{6}$/.test(s)) return "";
-  return `20${s.slice(0, 2)}-${s.slice(2, 4)}-${s.slice(4, 6)}`;
-}
 
 export async function GET(req: Request) {
   if (!checkAppPasscode(req)) {
@@ -57,19 +50,17 @@ export async function GET(req: Request) {
     }
 
     if (type === "image_done") {
-      const sb = getServerSupabase();
-      const fullDate = yymmddToDate(date);
-      const { data, error } = await sb
-        .from("stock_registrations")
-        .select("id, product_name, option_name, expiry_date, published_ref, created_at, published_at")
-        .eq("stored_as_code", false)
-        .eq("published", true)
-        .eq("product_name", product)
-        .eq("expiry_date", fullDate || date)
-        .order("created_at", { ascending: true })
-        .limit(500);
-      if (error) throw new Error(error.message);
-      return NextResponse.json({ ok: true, type, items: data ?? [] });
+      // GCP completed/ 폴더에서 파일 목록 조회 + 서명 URL (60분)
+      const gcpFiles = await listCompletedFiles(product, date);
+      const items = await Promise.all(
+        gcpFiles.map(async (f) => ({
+          name: f.name,
+          path: f.path,
+          time_created: f.timeCreated,
+          signed_url: await getSignedReadUrl(GIFTICON_BUCKET, f.path, 60),
+        })),
+      );
+      return NextResponse.json({ ok: true, type, items });
     }
 
     return NextResponse.json({ ok: false, error: "type 오류" }, { status: 400 });

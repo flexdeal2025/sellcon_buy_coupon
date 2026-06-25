@@ -59,20 +59,21 @@ export async function copyOcrToPending(
   return dest;
 }
 
-/** GIFTICON_BUCKET의 pending/ 폴더를 스캔해 상품명별 이미지 재고를 집계.
- *  경로 구조: pending/{상품명}/{YYMMDD}/{파일명}
+/** GIFTICON_BUCKET의 {folder}/{상품명}/{YYMMDD}/{파일명} 구조를 스캔해 상품명별로 집계.
+ *  pending  = 판매 대기 이미지형 재고
+ *  completed = 알림톡 발송 완료 (uuid 파일명으로 이동됨)
  */
-export async function listPendingStock(): Promise<
-  Array<{ product: string; total: number; dates: Array<{ date: string; count: number }> }>
-> {
+async function scanGcpImageFolder(
+  folder: "pending" | "completed",
+): Promise<Array<{ product: string; total: number; dates: Array<{ date: string; count: number }> }>> {
   const [files] = await client()
     .bucket(GIFTICON_BUCKET)
-    .getFiles({ prefix: "pending/", maxResults: 10000 });
+    .getFiles({ prefix: `${folder}/`, maxResults: 10000 });
 
   const map = new Map<string, Map<string, number>>();
   for (const f of files) {
     const parts = f.name.split("/");
-    // 실제 파일만: ['pending', 상품명, YYMMDD, 파일명] — 디렉터리 마커(trailing /) 제외
+    // 실제 파일만: [folder, 상품명, YYMMDD, 파일명] — 디렉터리 마커(trailing /) 제외
     if (parts.length < 4 || !parts[3]) continue;
     const product = parts[1];
     const date = parts[2];
@@ -90,12 +91,13 @@ export async function listPendingStock(): Promise<
     .sort((a, b) => b.total - a.total);
 }
 
-/** pending/{product}/{date}/ 폴더의 파일 목록 (모달 상세용) */
-export async function listPendingFiles(
+/** {folder}/{product}/{date}/ 폴더의 파일 목록 (모달 상세용) */
+async function listGcpImageFiles(
+  folder: "pending" | "completed",
   product: string,
   date: string,
 ): Promise<Array<{ name: string; path: string; timeCreated: string }>> {
-  const prefix = `pending/${product}/${date}/`;
+  const prefix = `${folder}/${product}/${date}/`;
   const [files] = await client().bucket(GIFTICON_BUCKET).getFiles({ prefix });
   return files
     .filter((f) => {
@@ -109,3 +111,17 @@ export async function listPendingFiles(
     }))
     .sort((a, b) => a.timeCreated.localeCompare(b.timeCreated));
 }
+
+/** 판매 대기 이미지 재고 (pending/) 상품별 집계 */
+export const listPendingStock = () => scanGcpImageFolder("pending");
+
+/** 알림톡 발송 완료 이미지 재고 (completed/) 상품별 집계 */
+export const listCompletedStock = () => scanGcpImageFolder("completed");
+
+/** pending/ 특정 상품+날짜의 파일 목록 */
+export const listPendingFiles = (product: string, date: string) =>
+  listGcpImageFiles("pending", product, date);
+
+/** completed/ 특정 상품+날짜의 파일 목록 */
+export const listCompletedFiles = (product: string, date: string) =>
+  listGcpImageFiles("completed", product, date);

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
-import { getServerSupabase } from "@/lib/supabase/server";
-import { listPendingStock } from "@/lib/gcp/storage";
+import { listPendingStock, listCompletedStock } from "@/lib/gcp/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -15,13 +14,6 @@ type StockItem = {
 };
 
 type CouponRow = { 상품명: string | null; expiry_yymmdd: string | null };
-type RegRow = { product_name: string | null; expiry_date: string | null };
-
-/** "2026-07-31" → "260731" */
-function dateToYymmdd(d: string): string {
-  const m = /^20(\d{2})-(\d{2})-(\d{2})$/.exec(d);
-  return m ? m[1] + m[2] + m[3] : "000000";
-}
 
 function buildMapItems(
   rows: Array<{ product: string; date: string }>,
@@ -82,20 +74,14 @@ export async function GET(req: Request) {
       }));
       items = buildMapItems(rows);
     } else if (type === "image_done") {
-      const sb = getServerSupabase();
-      const { data, error } = await sb
-        .from("stock_registrations")
-        .select("product_name, expiry_date")
-        .eq("stored_as_code", false)
-        .eq("published", true)
-        .limit(10000);
-      if (error) throw new Error(error.message);
-
-      const rows = ((data ?? []) as RegRow[]).map((r) => ({
-        product: r.product_name ?? "(상품명 없음)",
-        date: r.expiry_date ? dateToYymmdd(r.expiry_date) : "000000",
+      // GCP completed/ 폴더 스캔 — 알림톡 발송 완료 후 uuid 파일명으로 이동된 항목
+      const gcpItems = await listCompletedStock();
+      items = gcpItems.map((g) => ({
+        product: g.product,
+        product_key: g.product,
+        dates: g.dates,
+        total: g.total,
       }));
-      items = buildMapItems(rows);
     } else {
       return NextResponse.json({ ok: false, error: "type 오류" }, { status: 400 });
     }
