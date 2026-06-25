@@ -17,6 +17,8 @@ interface Row {
   stored_as_code: boolean;
   inspection_status: string;
   published: boolean;
+  published_at: string | null;
+  last_publish_error: string | null;
   unit_cost: number | null;
   exchange_location: string;
   source: string;
@@ -91,7 +93,9 @@ export function StockHistoryPanel() {
       유효기간: r.expiry_date ?? "",
       형식: r.stored_as_code ? "코드" : "이미지",
       검수: INSPECT_LABEL[r.inspection_status] ?? r.inspection_status,
-      발행: r.published ? "발행" : "미발행",
+      발행: r.published ? "발행" : (r.last_publish_error ? "실패" : "미발행"),
+      발행일시: r.published ? fmtDT(r.published_at) : "",
+      발행사유: r.last_publish_error ?? "",
       매입원가: r.unit_cost ?? "",
       출처: r.source,
       배치: r.batch_no,
@@ -155,17 +159,18 @@ export function StockHistoryPanel() {
               <th className="px-2 py-2 text-center">형식</th>
               <th className="px-2 py-2 text-center">검수</th>
               <th className="px-2 py-2 text-center">발행</th>
+              <th className="px-2 py-2 text-left">발행일시</th>
               <th className="px-2 py-2 text-left">배치</th>
               <th className="px-2 py-2 text-center">쿠폰</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={11} className="py-8 text-center text-muted-foreground"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
+              <tr><td colSpan={12} className="py-8 text-center text-muted-foreground"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">조회 결과가 없습니다.</td></tr>
+              <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">조회 결과가 없습니다.</td></tr>
             ) : rows.map((r) => (
-              <tr key={r.id} className={cn("border-b border-border/40", r.published ? "bg-green-50/30 dark:bg-green-950/10" : "")}>
+              <tr key={r.id} className={cn("border-b border-border/40", r.published ? "bg-green-50/30 dark:bg-green-950/10" : !r.published && r.last_publish_error ? "bg-destructive/5" : "")}>
                 <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{fmtDT(r.created_at)}</td>
                 <td className="px-2 py-1.5 tabular-nums">{r.purchase_date ?? "-"}</td>
                 <td className="px-2 py-1.5">{r.supplier || "-"}{r.source === "sellcon" && <span className="ml-1 rounded bg-blue-100 px-1 text-[10px] text-blue-600 dark:bg-blue-950/40">셀콘</span>}</td>
@@ -174,7 +179,11 @@ export function StockHistoryPanel() {
                 <td className="px-2 py-1.5 tabular-nums">{r.expiry_date ?? "-"}</td>
                 <td className="px-2 py-1.5 text-center">{r.stored_as_code ? "코드" : "이미지"}</td>
                 <td className={cn("px-2 py-1.5 text-center", r.inspection_status === "approved" ? "text-primary" : r.inspection_status === "rejected" ? "text-destructive" : "text-amber-600")}>{INSPECT_LABEL[r.inspection_status] ?? r.inspection_status}</td>
-                <td className={cn("px-2 py-1.5 text-center", r.published ? "text-green-600 font-medium" : "text-muted-foreground")}>{r.published ? "발행" : "—"}</td>
+                <td className={cn("px-2 py-1.5 text-center font-medium", r.published ? "text-success" : r.last_publish_error ? "text-destructive" : "text-muted-foreground")}
+                  title={!r.published && r.last_publish_error ? `발행실패: ${r.last_publish_error}` : undefined}>
+                  {r.published ? "발행" : r.last_publish_error ? "실패" : "—"}
+                </td>
+                <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{r.published ? fmtDT(r.published_at) : "-"}</td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.batch_no || "-"}</td>
                 <td className="px-2 py-1.5 text-center">
                   <button onClick={() => openViewer(r.id)} title="쿠폰 확인" className="text-muted-foreground hover:text-primary"><Eye className="h-4 w-4" /></button>

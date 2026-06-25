@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     const limit = Math.min(Number(u.searchParams.get("limit")) || 1000, 2000);
 
     let q = sb.from("stock_registrations")
-      .select("id, created_at, purchase_date, supplier, product_name, coupon_code, expiry_date, stored_as_code, inspection_status, published, unit_cost, exchange_location, source, batch_id, product_slug")
+      .select("id, created_at, published_at, last_publish_error, purchase_date, supplier, product_name, coupon_code, expiry_date, stored_as_code, inspection_status, published, unit_cost, exchange_location, source, batch_id, product_slug")
       .order("created_at", { ascending: false })
       .limit(limit);
 

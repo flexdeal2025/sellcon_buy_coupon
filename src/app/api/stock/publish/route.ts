@@ -130,6 +130,7 @@ export async function POST(req: Request) {
         ref = await copyOcrToPending(r.image_path, safeProduct, expYY, fileName);
       }
 
+      // 발행 확정(매출 심장) — 이 업데이트는 그대로. 발행 시각=published_at, 등록 시각=created_at(기존)
       await sb.from("stock_registrations").update({
         published: true,
         published_ref: ref,
@@ -137,8 +138,27 @@ export async function POST(req: Request) {
         inspection_status: "approved",
       }).eq("id", r.id);
       published++;
+      // 발행 시도 메타(등록이력 일원화) — 컬럼 미생성/오류여도 발행에 영향 없도록 분리·무시
+      try {
+        await sb.from("stock_registrations").update({
+          last_publish_error: null,
+          last_publish_attempt_at: new Date().toISOString(),
+          publish_attempts: (r.publish_attempts ?? 0) + 1,
+        }).eq("id", r.id);
+      } catch { /* 발행 메타 컬럼 미생성/오류여도 발행은 완료됨 */ }
     } catch (e) {
-      errors.push(`${r.id.slice(0, 8)}: ${e instanceof Error ? e.message : "발행 실패"}`);
+      const msg = e instanceof Error ? e.message : "발행 실패";
+      errors.push(`${r.id.slice(0, 8)}: ${msg}`);
+      // 실패 건은 '검수대기'로 환원(재검수 큐 노출) — 새 컬럼과 무관하게 항상 시도
+      try { await sb.from("stock_registrations").update({ inspection_status: "pending" }).eq("id", r.id); } catch { /* 환원 실패는 무시 */ }
+      // 실패 사유를 등록이력 행에 기록(일원화) — 컬럼 미생성/오류여도 무시
+      try {
+        await sb.from("stock_registrations").update({
+          last_publish_error: msg,
+          last_publish_attempt_at: new Date().toISOString(),
+          publish_attempts: (r.publish_attempts ?? 0) + 1,
+        }).eq("id", r.id);
+      } catch { /* 메타 컬럼 미생성/오류여도 무시 */ }
     }
   }
 
