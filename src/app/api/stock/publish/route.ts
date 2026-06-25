@@ -112,13 +112,19 @@ export async function POST(req: Request) {
         if (!r.image_path) throw new Error("이미지 경로 없음(원본 URL도 없음) — 검수에서 이미지 확인 필요");
         // 영문 슬러그: ① 저장값 → ② 마스터(vivacon_product_slugs) 상품명 매칭 → ③ AI → ④ item
         let slug = sanitizeSlug(String(r.product_slug ?? ""));
-        if (!slug && r.product_name) {
-          const pn = String(r.product_name).replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim();
+        const pn = r.product_name ? String(r.product_name).replace(/^\s*\[?\s*비바콘\s*\]?\s*/, "").trim() : "";
+        if (!slug && pn) {
           const { data: ms } = await sb.from("vivacon_product_slugs").select("slug").eq("product_name", pn).maybeSingle();
           if (ms?.slug) slug = sanitizeSlug(String(ms.slug));
         }
         if (!slug) {
-          try { slug = await slugifyProductName(r.product_name); } catch { slug = ""; }
+          try {
+            slug = await slugifyProductName(r.product_name);
+            // Gemini 성공 시 DB에 캐시 (다음 발행부터 AI 없이 재사용)
+            if (slug && pn) {
+              try { await sb.from("vivacon_product_slugs").upsert({ product_name: pn, slug }, { onConflict: "product_name" }); } catch { /* 캐시 저장 실패는 무시 */ }
+            }
+          } catch { slug = ""; }
         }
         if (!slug) slug = "item";
         const ext = (String(r.image_path).split(".").pop() ?? "jpg").toLowerCase();
