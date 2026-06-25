@@ -34,6 +34,7 @@ export function VivaconProofPanel() {
   const [mappedFilter, setMappedFilter] = useState<"" | "true" | "false">("");
   const [dateFilter, setDateFilter] = useState("");
   const [activeProof, setActiveProof] = useState<string | null>(null);
+  const [selectedProofs, setSelectedProofs] = useState<Set<string>>(new Set());
   const [selectedRegs, setSelectedRegs] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
@@ -86,7 +87,7 @@ export function VivaconProofPanel() {
 
   useEffect(() => { fetchProofs(); }, [fetchProofs]);
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
-  useEffect(() => { setSelectedRegs(new Set()); }, [supplier, mappedFilter, dateFilter]);
+  useEffect(() => { setSelectedRegs(new Set()); setSelectedProofs(new Set()); }, [supplier, mappedFilter, dateFilter]);
 
   const uploadProofs = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -166,18 +167,25 @@ export function VivaconProofPanel() {
     }
   };
 
-  // 순차 자동매핑: 현재 화면 미연결 재고 N개 ↔ 미연결 증빙 N개를 날짜순 1:1
+  // 순차 자동매핑: (선택된 증빙 ↔ 선택된 재고)를 날짜순 1:1. 선택 없으면 미연결 전체로 폴백.
   const autoMapSequential = async () => {
-    const unmapped = displayedInventory
-      .filter((r) => !r.proof_id)
-      .slice()
-      .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+    // 좌측 증빙: 선택분 우선 → 없으면 미연결 전체(날짜필터 반영)
     let fresh = proofs.filter((p) => p.linked_count === 0);
-    if (dateFilter) fresh = fresh.filter((p) => (p.proof_date ?? "") === dateFilter);
+    if (selectedProofs.size > 0) fresh = fresh.filter((p) => selectedProofs.has(p.id));
+    else if (dateFilter) fresh = fresh.filter((p) => (p.proof_date ?? "") === dateFilter);
     fresh = fresh.slice().sort((a, b) => (a.proof_date ?? "9999").localeCompare(b.proof_date ?? "9999"));
+
+    // 우측 재고: 선택분 우선 → 없으면 표시중 미연결 전체
+    let unmapped = displayedInventory.filter((r) => !r.proof_id);
+    if (selectedRegs.size > 0) unmapped = unmapped.filter((r) => selectedRegs.has(r.id));
+    unmapped = unmapped.slice().sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+
     const n = Math.min(unmapped.length, fresh.length);
-    if (n === 0) { toast.error("자동매핑할 미연결 재고/증빙이 없습니다"); return; }
-    if (!confirm(`미연결 재고 ${unmapped.length}건 · 미연결 증빙 ${fresh.length}건 중\n앞에서부터 ${n}건을 날짜순으로 1:1 자동 연결합니다. 계속할까요?`)) return;
+    if (n === 0) { toast.error("자동매핑할 미연결 재고/증빙이 없습니다 (좌측 증빙·우측 재고를 선택하세요)"); return; }
+    const countMsg = fresh.length === unmapped.length
+      ? `증빙 ${fresh.length}건 ↔ 재고 ${unmapped.length}건을 날짜순으로 1:1 연결합니다. 계속할까요?`
+      : `⚠️ 개수 불일치 — 증빙 ${fresh.length}건 · 재고 ${unmapped.length}건\n앞에서부터 ${n}건만 날짜순 1:1 연결합니다. 계속할까요?`;
+    if (!confirm(countMsg)) return;
     setBusy(true);
     try {
       let ok = 0;
@@ -188,8 +196,9 @@ export function VivaconProofPanel() {
         });
         if ((await res.json()).ok) ok++;
       }
-      toast.success(`${ok}건 순차 자동매핑 완료`);
+      toast.success(`${ok}건 순차 자동매핑 완료 (매입원가 자동 반영)`);
       setSelectedRegs(new Set());
+      setSelectedProofs(new Set());
       await Promise.all([fetchProofs(), fetchInventory()]);
     } finally {
       setBusy(false);
@@ -310,17 +319,37 @@ export function VivaconProofPanel() {
                 <input type="file" accept="image/*" multiple className="hidden" disabled={busy} onChange={(e) => { uploadProofs(e.target.files); e.target.value = ""; }} />
               </label>
             </div>
-            <p className="text-xs text-muted-foreground">증빙(거래내역/채팅 캡쳐)을 올리고, 카드를 클릭해 활성화한 뒤 우측 재고를 선택해 연결하세요. (한 증빙에 여러 재고 = N:1)</p>
+            <p className="text-xs text-muted-foreground">
+              • <strong>1건 연결(N:1)</strong>: 카드를 클릭해 활성화 → 우측 재고 선택 → 연결<br />
+              • <strong>순차 자동매핑</strong>: 좌측 증빙 여러 건 ☑︎ + 우측 재고 여러 건 ☑︎ → 날짜순 1:1 일괄 연결
+            </p>
           </div>
+
+          {selectedProofs.size > 0 && (
+            <div className="rounded-lg bg-primary/5 px-3 py-1.5 text-xs text-primary">
+              증빙 {selectedProofs.size}건 선택됨 · 우측 재고도 같은 수만큼 선택 후 '순차 자동매핑'
+              <button onClick={() => setSelectedProofs(new Set())} className="ml-2 underline hover:no-underline">선택해제</button>
+            </div>
+          )}
 
           {proofs.map((p) => {
             const amt = p.amount ?? null;
             const matched = amt != null && p.linked_count > 0 && amt === p.linked_cost;
             const mismatch = amt != null && p.linked_count > 0 && amt !== p.linked_cost;
+            const checked = selectedProofs.has(p.id);
             return (
             <div key={p.id} role="button" tabIndex={0} onClick={() => activateProof(p.id)}
               onKeyDown={(e) => e.key === "Enter" && activateProof(p.id)}
-              className={cn("flex w-full cursor-pointer gap-3 rounded-xl border p-2 text-left", activeProof === p.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border hover:bg-secondary/30")}>
+              className={cn("flex w-full cursor-pointer gap-3 rounded-xl border p-2 text-left",
+                checked ? "border-primary bg-primary/10 ring-1 ring-primary/40"
+                  : activeProof === p.id ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                  : "border-border hover:bg-secondary/30")}>
+              {p.linked_count === 0 && (
+                <input type="checkbox" checked={checked} title="순차 자동매핑용 선택"
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => { e.stopPropagation(); setSelectedProofs((s) => { const n = new Set(s); e.target.checked ? n.add(p.id) : n.delete(p.id); return n; }); }}
+                  className="mt-1 h-4 w-4 shrink-0" />
+              )}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.image_url} alt="증빙" className="h-24 w-20 rounded border border-border object-cover" />
               <div className="min-w-0 flex-1 text-xs">
@@ -348,11 +377,12 @@ export function VivaconProofPanel() {
         {/* 우: 재고 */}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">재고 {total}건</span>
+            <span className="text-sm font-medium">재고 {total}건{selectedRegs.size > 0 && !activeProof ? ` · ${selectedRegs.size}건 선택` : ""}</span>
             <button onClick={autoMapSequential} disabled={busy}
-              title="현재 화면의 미연결 재고와 미연결 증빙을 날짜순으로 1:1 자동 연결"
+              title="선택한 증빙 ↔ 선택한 재고를 날짜순 1:1 일괄 연결 (선택 없으면 미연결 전체)"
               className="ml-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm text-primary hover:bg-primary/10 disabled:opacity-40">
               <Link2 className="h-4 w-4" /> 순차 자동매핑
+              {selectedProofs.size > 0 && <span className="rounded-full bg-primary/20 px-1.5 text-xs">증빙 {selectedProofs.size}</span>}
             </button>
             <button onClick={linkSelected} disabled={busy || !activeProof || selectedRegs.size === 0}
               className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40">
