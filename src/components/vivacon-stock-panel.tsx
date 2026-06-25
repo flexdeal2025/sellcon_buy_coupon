@@ -249,6 +249,20 @@ export function VivaconStockPanel() {
   };
 
   const setStatus = async (r: Reg, status: "approved" | "pending") => {
+    // 승인 시 현재 카드 상태(발행형태 포함)를 먼저 저장하여 UI 변경이 DB에 반영되도록 함
+    if (status === "approved") {
+      const saveRes = await fetch("/api/stock/registration", {
+        method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+        body: JSON.stringify({ id: r.id, patch: {
+          product_name: r.product_name, option_name: r.option_name, coupon_code: r.coupon_code,
+          expiry_date: r.expiry_date ?? "", supplier: r.supplier ?? "",
+          unit_cost: r.unit_cost ?? "", stored_as_code: r.stored_as_code, product_slug: r.product_slug ?? "",
+        } }),
+      });
+      const saveJson = await saveRes.json();
+      if (!saveJson.ok) { toast.error("저장 실패(승인 전): " + saveJson.error); return; }
+      updateRow(r.id, saveJson.row);
+    }
     const res = await fetch("/api/stock/registration", {
       method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
       body: JSON.stringify({ id: r.id, patch: { inspection_status: status } }),
