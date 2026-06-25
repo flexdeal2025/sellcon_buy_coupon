@@ -387,8 +387,12 @@ export function VivaconStockPanel() {
       const res = await fetch("/api/stock/publish", { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify({ ids }) });
       const json = await res.json();
       if (!json.ok) { toast.error("발행 실패: " + json.error); return; }
-      toast.success(`${json.published}건 발행 완료${json.errors?.length ? ` / 실패 ${json.errors.length}` : ""}`);
-      if (json.errors?.length) console.warn("발행 실패:", json.errors);
+      toast.success(`${json.published}건 발행 완료${json.errors?.length ? ` · 실패 ${json.errors.length}건은 검수대기로 환원` : ""}`);
+      if (json.errors?.length) {
+        const list = json.errors as string[];
+        toast.error("발행 실패 내역", { description: list.slice(0, 6).join("\n") + (list.length > 6 ? `\n…외 ${list.length - 6}건` : "") });
+        console.warn("발행 실패:", json.errors);
+      }
       if (batch) await fetchRows(batch.id);
       setSelected(new Set());
     } finally {
