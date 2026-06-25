@@ -503,14 +503,14 @@ export async function POST(req: Request) {
       const destPathP = `proof/${ymdP}/${crypto.randomUUID()}.${isPng ? "png" : "jpg"}`;
       await uploadProofImage(destPathP, buf, mime);
 
-      // 증빙 행 적재 (기본 컬럼) + OCR 부가 컬럼 분리 저장
+      // 증빙 행 적재 (기본 컬럼) + OCR 부가 컬럼 분리 저장. OCR 실패 사유는 memo에 보존(웹 진단용)
       const { data: pf, error: pe } = await sb.from("purchase_proofs").insert({
         platform: pocr?.platform ?? "당근마켓",
         trader_name: pocr?.trader_name ?? "",
         proof_date: pocr?.proof_date || null,
         amount: pocr?.total_amount || null,
         image_path: destPathP,
-        memo: "",
+        memo: pocrErr ? `OCR실패: ${pocrErr.slice(0, 200)}` : "",
       }).select("id").single();
       if (pe) { await reply("⚠️ 증빙 적재 실패: " + pe.message); return NextResponse.json({ ok: true }); }
       if (pocr) {
@@ -523,9 +523,9 @@ export async function POST(req: Request) {
         } catch { /* 부가 컬럼 미생성 — 무시 */ }
       }
 
-      // OCR 상품명 없으면 추천 불가 — 적재만 안내
+      // OCR 상품명 없으면 추천 불가 — 적재만 안내 (원본화질 권장: 카메라앱 압축 회피)
       if (!pocr?.product_name) {
-        await reply(`🧾 증빙 적재됨${pocrErr ? ` (OCR 실패: ${pocrErr})` : " (상품명 미인식)"}.\n웹 '증빙 매핑'에서 수동 연결하세요.`);
+        await reply(`🧾 증빙 적재됨${pocrErr ? ` (OCR 실패: ${pocrErr})` : " (상품명 미인식)"}.\n💡 더 또렷한 인식을 원하면 캡쳐를 '파일(원본)'로 보내주세요. (사진은 텔레그램이 재압축)\n웹 '증빙 매핑'에서 수동 연결도 가능합니다.`);
         return NextResponse.json({ ok: true, proof: pf.id });
       }
 

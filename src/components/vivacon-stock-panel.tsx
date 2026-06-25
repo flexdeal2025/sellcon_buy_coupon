@@ -220,14 +220,17 @@ export function VivaconStockPanel() {
   const updateRow = (id: string, patch: Partial<Reg>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
+  // 검수 카드의 현재 화면 상태 → 저장 페이로드(저장/승인/발행 전 공통). 화면=DB 동기화 보장.
+  const cardPatch = (r: Reg) => ({
+    product_name: r.product_name, option_name: r.option_name, coupon_code: r.coupon_code,
+    expiry_date: r.expiry_date ?? "", supplier: r.supplier ?? "",
+    unit_cost: r.unit_cost ?? "", stored_as_code: r.stored_as_code, product_slug: r.product_slug ?? "",
+  });
+
   const saveRow = async (r: Reg) => {
     const res = await fetch("/api/stock/registration", {
       method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
-      body: JSON.stringify({ id: r.id, patch: {
-        product_name: r.product_name, option_name: r.option_name, coupon_code: r.coupon_code,
-        expiry_date: r.expiry_date ?? "", supplier: r.supplier ?? "",
-        unit_cost: r.unit_cost ?? "", stored_as_code: r.stored_as_code, product_slug: r.product_slug ?? "",
-      } }),
+      body: JSON.stringify({ id: r.id, patch: cardPatch(r) }),
     });
     const json = await res.json();
     if (!json.ok) { toast.error("저장 실패: " + json.error); return; }
@@ -270,11 +273,7 @@ export function VivaconStockPanel() {
     if (status === "approved") {
       const saveRes = await fetch("/api/stock/registration", {
         method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
-        body: JSON.stringify({ id: r.id, patch: {
-          product_name: r.product_name, option_name: r.option_name, coupon_code: r.coupon_code,
-          expiry_date: r.expiry_date ?? "", supplier: r.supplier ?? "",
-          unit_cost: r.unit_cost ?? "", stored_as_code: r.stored_as_code, product_slug: r.product_slug ?? "",
-        } }),
+        body: JSON.stringify({ id: r.id, patch: cardPatch(r) }),
       });
       const saveJson = await saveRes.json();
       if (!saveJson.ok) { toast.error("저장 실패(승인 전): " + saveJson.error); return; }
@@ -421,11 +420,22 @@ export function VivaconStockPanel() {
   };
 
   const publish = async () => {
-    const ids = rows.filter((r) => selected.has(r.id) && r.inspection_status === "approved" && !r.published).map((r) => r.id);
+    const targets = rows.filter((r) => selected.has(r.id) && r.inspection_status === "approved" && !r.published);
+    const ids = targets.map((r) => r.id);
     if (ids.length === 0) { toast.error("발행할 '승인'된 항목을 선택하세요"); return; }
     if (!confirm(`${ids.length}건을 실제 재고로 발행합니다.\n- 코드형 → 비바콘 판매재고(coupon_codes)\n- 이미지형 → GCP 발송폴더\n발송기에 즉시 반영됩니다. 계속할까요?`)) return;
     setBusy(true);
     try {
+      // 발행 직전 현재 화면 상태를 먼저 저장 — 승인 후 편집한 미저장 값이 발행에 누락되는 desync 방지.
+      // (발행 API는 DB값을 다시 읽어 분기/삽입하므로 화면=DB 일치가 필수)
+      for (const r of targets) {
+        const sv = await fetch("/api/stock/registration", {
+          method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ id: r.id, patch: cardPatch(r) }),
+        });
+        const sj = await sv.json();
+        if (!sj.ok) { toast.error(`발행 보류 — '${r.product_name || r.id.slice(0, 8)}' 저장 실패: ${sj.error}`); return; }
+      }
       const res = await fetch("/api/stock/publish", { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify({ ids }) });
       const json = await res.json();
       if (!json.ok) { toast.error("발행 실패: " + json.error); return; }
