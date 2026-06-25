@@ -235,6 +235,23 @@ export function VivaconStockPanel() {
     toast.success("저장됨");
   };
 
+  // 발행형태(코드형/이미지형)는 발행 경로를 바꾸는 치명적 필드 → 변경 즉시 DB 저장(desync 방지)
+  const setStoredType = async (r: Reg, isCode: boolean) => {
+    if (r.stored_as_code === isCode) return;
+    updateRow(r.id, { stored_as_code: isCode }); // 낙관적 반영
+    const res = await fetch("/api/stock/registration", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+      body: JSON.stringify({ id: r.id, patch: { stored_as_code: isCode } }),
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      updateRow(r.id, { stored_as_code: !isCode }); // 실패 시 롤백
+      toast.error("발행형태 저장 실패: " + json.error);
+      return;
+    }
+    toast.success(isCode ? "코드형으로 저장됨" : "이미지형으로 저장됨");
+  };
+
   // 영문 슬러그 AI 생성
   const genSlug = async (r: Reg) => {
     if (!r.product_name.trim()) { toast.error("상품명을 먼저 입력하세요"); return; }
@@ -680,7 +697,7 @@ export function VivaconStockPanel() {
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <select className="rounded-md border border-border bg-background px-2 py-1.5 text-sm" disabled={r.published}
-                  value={r.stored_as_code ? "code" : "image"} onChange={(e) => updateRow(r.id, { stored_as_code: e.target.value === "code" })}>
+                  value={r.stored_as_code ? "code" : "image"} onChange={(e) => setStoredType(r, e.target.value === "code")}>
                   <option value="code">코드형</option>
                   <option value="image">이미지형</option>
                 </select>
