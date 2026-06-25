@@ -22,23 +22,76 @@ function bigrams(s: string): Set<string> {
   return set;
 }
 
-/** 두 상품명의 유사도 0~1 (정규화 + char-bigram Jaccard, 포함관계 보정) */
+/** 금액권 추출 → 원 단위 정수. "5만원권"→50000, "3천원"→3000, "50000원"→50000. 없으면 null */
+export function extractWon(s: string): number | null {
+  const t = String(s ?? "");
+  let m = t.match(/(\d+)\s*만\s*원?/);
+  if (m) return parseInt(m[1], 10) * 10000;
+  m = t.match(/(\d+)\s*천\s*원?/);
+  if (m) return parseInt(m[1], 10) * 1000;
+  m = t.match(/(\d{4,})\s*원/);
+  if (m) return parseInt(m[1], 10);
+  return null;
+}
+
+/** 선두 브랜드 토큰: 정규화 문자열의 맨 앞 한글 또는 영문 연속 구간 (숫자 만나면 중단) */
+function brandToken(normalized: string): string {
+  const m = normalized.match(/^[가-힣]+|^[a-z]+/);
+  return m ? m[0] : "";
+}
+
+/** 두 브랜드 토큰이 접두 관계(한쪽이 다른쪽으로 시작)이고 둘 다 2자 이상이면 true.
+ *  예: "투썸플레이스" ⊃ "투썸", "gs25" ⊃ "gs" */
+function brandPrefixMatch(a: string, b: string): boolean {
+  if (a.length < 2 || b.length < 2) return false;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+/**
+ * 두 상품명의 유사도 0~1.
+ * 기본 char-bigram Jaccard에 더해:
+ *  - 브랜드 접두 일치(투썸플레이스↔투썸) + 금액권 일치(5만원↔5만원) → 강한 보정
+ *  - 금액권이 서로 다르면(3만↔5만) 다른 상품으로 강한 감점
+ *  - 포함관계(교촌…콜라 ⊂ 교촌…콜라1.25L) 보정
+ * '잔액관리형'·'기프티콘' 같은 노이즈 단어는 normalizeName이 제거.
+ */
 export function nameSimilarity(a: string, b: string): number {
   const na = normalizeName(a);
   const nb = normalizeName(b);
   if (!na || !nb) return 0;
   if (na === nb) return 1;
-  // 한쪽이 다른 쪽을 완전히 포함하면 높은 점수 (예: "교촌치킨허니콤보콜라" ⊂ "교촌치킨허니콤보콜라125l")
-  if (na.includes(nb) || nb.includes(na)) {
-    const ratio = Math.min(na.length, nb.length) / Math.max(na.length, nb.length);
-    return 0.85 + 0.15 * ratio;
-  }
+
+  // 기본 bigram Jaccard
   const A = bigrams(na);
   const B = bigrams(nb);
   let inter = 0;
   for (const g of A) if (B.has(g)) inter++;
   const union = A.size + B.size - inter;
-  return union === 0 ? 0 : inter / union;
+  let score = union === 0 ? 0 : inter / union;
+
+  // 포함관계 보정
+  if (na.includes(nb) || nb.includes(na)) {
+    const ratio = Math.min(na.length, nb.length) / Math.max(na.length, nb.length);
+    score = Math.max(score, 0.85 + 0.15 * ratio);
+  }
+
+  // 금액권 신호 (원본 문자열 기준 — 만/천/원 표기 보존)
+  const aWon = extractWon(a);
+  const bWon = extractWon(b);
+  const bothWon = aWon != null && bWon != null;
+  const wonEqual = bothWon && aWon === bWon;
+  const wonConflict = bothWon && aWon !== bWon;
+
+  // 브랜드 접두 신호
+  const brandMatch = brandPrefixMatch(brandToken(na), brandToken(nb));
+
+  if (brandMatch) {
+    if (wonEqual) score = Math.max(score, 0.92);          // 같은 브랜드 + 같은 금액권 → 거의 확실
+    else if (!bothWon) score = Math.max(score, 0.55 + 0.3 * score); // 브랜드 일치, 금액 비교 불가(검수 전제)
+  }
+  if (wonConflict) score = Math.min(score, 0.35);          // 금액권 다르면 다른 상품 가능성 ↑
+
+  return Math.max(0, Math.min(1, score));
 }
 
 export interface MatchCandidate {

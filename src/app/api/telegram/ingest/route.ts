@@ -286,8 +286,20 @@ export async function POST(req: Request) {
       const payload = linkIds.map((rid) => ({ proof_id: pid, registration_id: rid }));
       const { error: le } = await sb.from("proof_registration_links").upsert(payload, { onConflict: "registration_id" });
       if (le) { await reply("⚠️ 연결 실패: " + le.message); return NextResponse.json({ ok: true }); }
+      // 매입원가 자동 기입(증빙 결제금액 → 연결 재고). N:1은 균등 분할(나머지 첫 건).
+      let costNote = "";
+      const { data: pfRow } = await sb.from("purchase_proofs").select("amount").eq("id", pid).single();
+      const pAmt = pfRow?.amount ?? null;
+      if (typeof pAmt === "number" && pAmt > 0) {
+        const base = Math.floor(pAmt / linkIds.length);
+        const rem = pAmt - base * linkIds.length;
+        for (let i = 0; i < linkIds.length; i++) {
+          await sb.from("stock_registrations").update({ unit_cost: base + (i === 0 ? rem : 0) }).eq("id", linkIds[i]);
+        }
+        costNote = `\n💰 매입원가 ${pAmt.toLocaleString()}원 반영${linkIds.length > 1 ? `(${linkIds.length}건 분할)` : ""}`;
+      }
       try { await sb.from("telegram_ingest_context").update({ pending_proof_id: null, pending_link_ids: [] }).eq("chat_id", String(chatId)); } catch { /* noop */ }
-      await reply(`✅ ${linkIds.length}건 증빙 연결 완료. 다음 증빙 캡쳐를 올리세요.`);
+      await reply(`✅ ${linkIds.length}건 증빙 연결 완료.${costNote}\n다음 증빙 캡쳐를 올리세요.`);
       return NextResponse.json({ ok: true, linked: linkIds.length });
     }
     if (/^(스킵|건너뛰기|skip)$/i.test(text) && chatId != null) {

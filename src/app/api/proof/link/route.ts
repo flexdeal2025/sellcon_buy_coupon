@@ -19,7 +19,23 @@ export async function POST(req: Request) {
     const payload = registration_ids.map((rid) => ({ proof_id, registration_id: rid }));
     const { error } = await sb.from("proof_registration_links").upsert(payload, { onConflict: "registration_id" });
     if (error) throw new Error(error.message);
-    return NextResponse.json({ ok: true, linked: registration_ids.length });
+
+    // 매입원가 자동 기입: 증빙 결제금액을 연결 재고의 매입원가로 반영
+    //  · 1:1 → 결제금액 그대로 · N:1 → 균등 분할(나머지는 첫 건) → 합계 = 결제금액 보존
+    let costUpdated = 0;
+    const { data: pf } = await sb.from("purchase_proofs").select("amount").eq("id", proof_id).single();
+    const amount = pf?.amount ?? null;
+    if (typeof amount === "number" && amount > 0) {
+      const n = registration_ids.length;
+      const base = Math.floor(amount / n);
+      const remainder = amount - base * n;
+      for (let i = 0; i < n; i++) {
+        const cost = base + (i === 0 ? remainder : 0);
+        const { error: ue } = await sb.from("stock_registrations").update({ unit_cost: cost }).eq("id", registration_ids[i]);
+        if (!ue) costUpdated++;
+      }
+    }
+    return NextResponse.json({ ok: true, linked: registration_ids.length, cost_updated: costUpdated, cost_total: amount ?? 0 });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "연결 실패" }, { status: 500 });
   }
