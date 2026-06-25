@@ -152,7 +152,11 @@ export function VivaconProofPanel() {
       });
       const json = await res.json();
       if (!json.ok) { toast.error("연결 실패: " + json.error); return; }
-      toast.success(`${json.linked}건 연결`);
+      toast.success(
+        json.cost_total
+          ? `${json.linked}건 연결 · 매입원가 ${Number(json.cost_total).toLocaleString()}원 반영`
+          : `${json.linked}건 연결`,
+      );
       setSelectedRegs(new Set());
       setSuggestion(null);
       setActiveProof(null);
@@ -391,6 +395,7 @@ export function VivaconProofPanel() {
                 <tr>
                   <th className="px-2 py-1.5 w-8"></th>
                   <th className="px-2 py-1.5 text-left">상품명</th>
+                  <th className="px-2 py-1.5 text-left">매입처</th>
                   <th className="px-2 py-1.5 text-left">쿠폰번호</th>
                   <th className="px-2 py-1.5 text-left">유효기간</th>
                   <th className="px-2 py-1.5 text-left">등록일</th>
@@ -405,6 +410,7 @@ export function VivaconProofPanel() {
                         onChange={(e) => setSelectedRegs((p) => { const s = new Set(p); e.target.checked ? s.add(r.id) : s.delete(r.id); return s; })} />
                     </td>
                     <td className="px-2 py-1.5 truncate max-w-32" title={r.product_name}>{r.product_name}{r.option_name && ` (${r.option_name})`}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.supplier || undefined}>{r.supplier || "-"}</td>
                     <td className="px-2 py-1.5 font-mono truncate max-w-28" title={r.coupon_code}>{r.coupon_code}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{r.expiry_date ?? "-"}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.purchase_date ? `매입일 ${r.purchase_date}` : undefined}>{toKST(r.created_at, true) || "-"}</td>
@@ -417,7 +423,7 @@ export function VivaconProofPanel() {
                     </td>
                   </tr>
                 ))}
-                {displayedInventory.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
+                {displayedInventory.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">재고가 없습니다.</td></tr>}
               </tbody>
             </table>
           </div>
