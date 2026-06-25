@@ -63,25 +63,49 @@ export async function copyOcrToPending(
  *  경로 구조: pending/{상품명}/{YYMMDD}/{파일명}
  */
 export async function listPendingStock(): Promise<
-  Array<{ product: string; count: number; dates: string[] }>
+  Array<{ product: string; total: number; dates: Array<{ date: string; count: number }> }>
 > {
   const [files] = await client()
     .bucket(GIFTICON_BUCKET)
     .getFiles({ prefix: "pending/", maxResults: 10000 });
 
-  const map = new Map<string, { count: number; dates: Set<string> }>();
+  const map = new Map<string, Map<string, number>>();
   for (const f of files) {
     const parts = f.name.split("/");
     // 실제 파일만: ['pending', 상품명, YYMMDD, 파일명] — 디렉터리 마커(trailing /) 제외
     if (parts.length < 4 || !parts[3]) continue;
     const product = parts[1];
     const date = parts[2];
-    const cur = map.get(product) ?? { count: 0, dates: new Set<string>() };
-    cur.count++;
-    cur.dates.add(date);
-    map.set(product, cur);
+    if (!map.has(product)) map.set(product, new Map());
+    const dm = map.get(product)!;
+    dm.set(date, (dm.get(date) ?? 0) + 1);
   }
   return Array.from(map.entries())
-    .map(([product, v]) => ({ product, count: v.count, dates: Array.from(v.dates).sort() }))
-    .sort((a, b) => b.count - a.count);
+    .map(([product, dm]) => {
+      const dates = Array.from(dm.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      return { product, total: dates.reduce((s, d) => s + d.count, 0), dates };
+    })
+    .sort((a, b) => b.total - a.total);
+}
+
+/** pending/{product}/{date}/ 폴더의 파일 목록 (모달 상세용) */
+export async function listPendingFiles(
+  product: string,
+  date: string,
+): Promise<Array<{ name: string; path: string; timeCreated: string }>> {
+  const prefix = `pending/${product}/${date}/`;
+  const [files] = await client().bucket(GIFTICON_BUCKET).getFiles({ prefix });
+  return files
+    .filter((f) => {
+      const parts = f.name.split("/");
+      return parts.length >= 4 && !!parts[3];
+    })
+    .map((f) => ({
+      name: f.name.split("/").pop() ?? f.name,
+      path: f.name,
+      timeCreated: (f.metadata as { timeCreated?: string }).timeCreated ?? "",
+    }))
+    .sort((a, b) => a.timeCreated.localeCompare(b.timeCreated));
 }

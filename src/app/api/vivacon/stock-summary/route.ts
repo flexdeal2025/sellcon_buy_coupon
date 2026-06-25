@@ -1,82 +1,111 @@
 import { NextResponse } from "next/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
+import { getServerSupabase } from "@/lib/supabase/server";
 import { listPendingStock } from "@/lib/gcp/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-type CouponRow = { 상품명: string | null; expiry_date: string | null };
+type DateCount = { date: string; count: number };
+type StockItem = {
+  product: string;
+  product_key: string;
+  dates: DateCount[];
+  total: number;
+};
+
+type CouponRow = { 상품명: string | null; expiry_yymmdd: string | null };
+type RegRow = { product_name: string | null; expiry_date: string | null };
+
+/** "2026-07-31" → "260731" */
+function dateToYymmdd(d: string): string {
+  const m = /^20(\d{2})-(\d{2})-(\d{2})$/.exec(d);
+  return m ? m[1] + m[2] + m[3] : "000000";
+}
+
+function buildMapItems(
+  rows: Array<{ product: string; date: string }>,
+): StockItem[] {
+  const map = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    if (!map.has(r.product)) map.set(r.product, new Map());
+    const dm = map.get(r.product)!;
+    dm.set(r.date, (dm.get(r.date) ?? 0) + 1);
+  }
+  return Array.from(map.entries())
+    .map(([product, dm]) => {
+      const dates = Array.from(dm.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      return {
+        product,
+        product_key: product.replace(/\//g, "_"),
+        dates,
+        total: dates.reduce((s, d) => s + d.count, 0),
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+}
 
 export async function GET(req: Request) {
   if (!checkAppPasscode(req)) {
     return NextResponse.json({ ok: false, error: "인증 실패" }, { status: 401 });
   }
+
+  const url = new URL(req.url);
+  const type = url.searchParams.get("type") ?? "image";
+
   try {
-    // 1. GCP GIFTICON_BUCKET pending/ 스캔
-    const gcpItems = await listPendingStock();
+    let items: StockItem[] = [];
 
-    // 2. 비바콘 coupon_codes available 집계
-    const vc = getVivaconSupabase();
-    const { data, error } = await vc
-      .from("coupon_codes")
-      .select("상품명, expiry_date")
-      .eq("status", "available")
-      .limit(5000);
-    if (error) throw new Error(error.message);
-    const coupons = (data ?? []) as unknown as CouponRow[];
+    if (type === "image") {
+      const gcpItems = await listPendingStock();
+      items = gcpItems.map((g) => ({
+        product: g.product,
+        product_key: g.product,
+        dates: g.dates,
+        total: g.total,
+      }));
+    } else if (type === "code" || type === "code_done") {
+      const vc = getVivaconSupabase();
+      const status = type === "code" ? "available" : "exchanged";
+      const { data, error } = await vc
+        .from("coupon_codes")
+        .select("상품명, expiry_yymmdd")
+        .eq("status", status)
+        .limit(10000);
+      if (error) throw new Error(error.message);
 
-    // 3. 코드형: 상품명 기준으로 집계. key = 상품명.replace(/\//g, '_') (GCP 폴더명 정규화와 동일)
-    const codeMap = new Map<
-      string,
-      { display: string; count: number; earliest_expiry: string | null }
-    >();
-    for (const c of coupons) {
-      const rawName = c.상품명 ?? "";
-      const key = rawName.replace(/\//g, "_");
-      const cur = codeMap.get(key) ?? { display: rawName, count: 0, earliest_expiry: null };
-      cur.count++;
-      if (c.expiry_date) {
-        if (!cur.earliest_expiry || c.expiry_date < cur.earliest_expiry) {
-          cur.earliest_expiry = c.expiry_date;
-        }
-      }
-      codeMap.set(key, cur);
+      const rows = ((data ?? []) as unknown as CouponRow[]).map((c) => ({
+        product: c.상품명 ?? "(상품명 없음)",
+        date: c.expiry_yymmdd ?? "000000",
+      }));
+      items = buildMapItems(rows);
+    } else if (type === "image_done") {
+      const sb = getServerSupabase();
+      const { data, error } = await sb
+        .from("stock_registrations")
+        .select("product_name, expiry_date")
+        .eq("stored_as_code", false)
+        .eq("published", true)
+        .limit(10000);
+      if (error) throw new Error(error.message);
+
+      const rows = ((data ?? []) as RegRow[]).map((r) => ({
+        product: r.product_name ?? "(상품명 없음)",
+        date: r.expiry_date ? dateToYymmdd(r.expiry_date) : "000000",
+      }));
+      items = buildMapItems(rows);
+    } else {
+      return NextResponse.json({ ok: false, error: "type 오류" }, { status: 400 });
     }
-
-    // 4. GCP + 코드형 병합: product_key 기준으로 합집합
-    const allKeys = new Set([
-      ...gcpItems.map((g) => g.product),
-      ...Array.from(codeMap.keys()),
-    ]);
-
-    const items = Array.from(allKeys)
-      .map((key) => {
-        const gcp = gcpItems.find((g) => g.product === key);
-        const code = codeMap.get(key);
-        const image_count = gcp?.count ?? 0;
-        const code_count = code?.count ?? 0;
-        // 상품명 표시: 코드형 원본(/ 포함) 우선, 없으면 GCP 폴더명
-        const product = code?.display || key;
-        return {
-          product,
-          product_key: key,
-          image_count,
-          image_dates: gcp?.dates ?? [],
-          code_count,
-          code_earliest_expiry: code?.earliest_expiry ?? null,
-          total: image_count + code_count,
-        };
-      })
-      .sort((a, b) => b.total - a.total || a.product.localeCompare(b.product));
-
-    const image_total = items.reduce((s, x) => s + x.image_count, 0);
-    const code_total = items.reduce((s, x) => s + x.code_count, 0);
 
     return NextResponse.json({
       ok: true,
+      type,
       items,
-      image_total,
-      code_total,
+      total_count: items.reduce((s, x) => s + x.total, 0),
+      product_count: items.length,
       scanned_at: new Date().toISOString(),
     });
   } catch (e) {
