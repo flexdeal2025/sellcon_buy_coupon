@@ -16,7 +16,7 @@ export async function GET(req: Request) {
 
     let q = sb
       .from("stock_registrations")
-      .select("id,product_name,option_name,coupon_code,expiry_date,supplier,purchase_date,created_at,stored_as_code,published")
+      .select("id,product_name,option_name,coupon_code,expiry_date,supplier,purchase_date,created_at,stored_as_code,published,source")
       .order("created_at", { ascending: true });
     if (batchId) q = q.eq("batch_id", batchId);
     if (supplier) q = q.eq("supplier", supplier);
