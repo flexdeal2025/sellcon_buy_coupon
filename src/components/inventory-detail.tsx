@@ -29,15 +29,17 @@ import {
   CircleCheck,
   Circle,
   Copy,
+  Trash2,
 } from "lucide-react";
 
 interface Props {
   record: PurchaseRecord;
   onUpdate: (id: string, patch: Partial<PurchaseRecord>) => Promise<PurchaseRecord>;
+  onDelete: (id: string) => Promise<void>;
   onClose: () => void;
 }
 
-export function InventoryDetail({ record, onUpdate, onClose }: Props) {
+export function InventoryDetail({ record, onUpdate, onDelete, onClose }: Props) {
   const router = useRouter();
   const { worker } = useWorker();
   const { lines } = usePhoneLines();
@@ -109,6 +111,24 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "저장 실패");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (
+      !confirm(
+        `이 매입 건을 삭제합니다.\n\n${record.supplier} · ${record.product_name}\n총 ${formatKRW(record.total_price)} · 입고 ${record.received_quantity}/${record.ordered_quantity}\n\n삭제하면 되돌릴 수 없습니다. 계속할까요?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      await onDelete(record.id);
+      toast.success("매입 건이 삭제되었습니다.");
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "삭제 실패");
       setBusy(false);
     }
   }
@@ -429,6 +449,16 @@ export function InventoryDetail({ record, onUpdate, onClose }: Props) {
             목록으로
           </Button>
         </div>
+
+        {/* 매입 삭제 (되돌릴 수 없음) */}
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={busy}
+          className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+        >
+          <Trash2 className="h-4 w-4" />이 매입 건 삭제
+        </button>
       </div>
     </div>
   );

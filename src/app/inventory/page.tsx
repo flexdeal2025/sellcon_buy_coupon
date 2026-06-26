@@ -14,7 +14,7 @@ function InventoryInner() {
   const router = useRouter();
   const params = useSearchParams();
   const id = params.get("id");
-  const { records, loading, update } = useRecords();
+  const { records, loading, update, remove } = useRecords();
 
   const selected = useMemo(
     () => records.find((r) => r.id === id) ?? null,
@@ -50,6 +50,7 @@ function InventoryInner() {
         <InventoryDetail
           record={selected}
           onUpdate={update}
+          onDelete={remove}
           onClose={() => router.push("/inventory")}
         />
       </div>
