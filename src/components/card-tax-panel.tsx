@@ -264,21 +264,42 @@ export function CardTaxPanel() {
     }
   };
 
-  /* ── 엑셀 내보내기 ──────────────────────── */
+  /* ── 엑셀 내보내기 (전 건) ───────────────────
+     Supabase 기본 1,000행 제한을 우회하기 위해 1,000건씩 페이지네이션으로
+     끝까지 가져온다. 카드번호 포함. 현재 필터가 있으면 필터 결과 전체. */
+  type ExportRow = Pick<CardTransaction,
+    "transaction_date" | "owner" | "card_company" | "card_number" |
+    "merchant_name" | "amount" | "product_name" | "cost_category">;
+
   const handleExport = async () => {
-    toast.info("데이터 가져오는 중...");
-    let q = sb
-      .from("card_transactions_tax")
-      .select("transaction_date,owner,card_company,card_number,merchant_name,amount,product_name,cost_category")
-      .order("transaction_date", { ascending: true })
-      .order("card_company",     { ascending: true });
-    q = applyFilters(q);
-    const { data, error } = await q;
-    if (error || !data) { toast.error("데이터 조회 실패"); return; }
+    const PAGE = 1000;
+    const all: ExportRow[] = [];
+    toast.info("전체 데이터 가져오는 중...");
+    try {
+      for (let from = 0; ; from += PAGE) {
+        let q = sb
+          .from("card_transactions_tax")
+          .select("transaction_date,owner,card_company,card_number,merchant_name,amount,product_name,cost_category")
+          .order("transaction_date", { ascending: true })
+          .order("card_company",     { ascending: true })
+          .order("id",               { ascending: true }) // 페이지 경계 안정화(중복·누락 방지)
+          .range(from, from + PAGE - 1);
+        q = applyFilters(q);
+        const { data, error } = await q;
+        if (error) { toast.error("데이터 조회 실패: " + error.message); return; }
+        const batch = (data ?? []) as ExportRow[];
+        all.push(...batch);
+        if (batch.length < PAGE) break; // 마지막 페이지
+      }
+    } catch (e) {
+      toast.error("내보내기 실패: " + (e instanceof Error ? e.message : "오류"));
+      return;
+    }
+    if (all.length === 0) { toast.error("내보낼 데이터가 없습니다"); return; }
 
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.json_to_sheet(
-      data.map((r) => ({
+      all.map((r) => ({
         날짜:   r.transaction_date,
         명의자: r.owner,
         카드사: r.card_company,
@@ -293,7 +314,7 @@ export function CardTaxPanel() {
     XLSX.utils.book_append_sheet(wb, ws, "카드내역");
     const today = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `카드장부_${today}.xlsx`);
-    toast.success(`${data.length.toLocaleString()}건 내보내기 완료`);
+    toast.success(`${all.length.toLocaleString()}건 내보내기 완료`);
   };
 
   /* ── 옵션 추가 ──────────────────────────── */
