@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
 import { listPendingStock, listCompletedStock } from "@/lib/gcp/storage";
+import { subtractCompleted } from "@/lib/stock-net";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -54,22 +55,12 @@ export async function GET(req: Request) {
       // 판매중 = pending − completed (상품×유효기간별 차감).
       // 발송 후 completed로 복사되지만 pending에서 삭제되지 않아, 차감해야 순수 판매중만 남는다.
       const [pend, done] = await Promise.all([listPendingStock(), listCompletedStock()]);
-      const doneMap = new Map<string, number>(); // `${product}|${date}` → 판매완료 수
-      for (const g of done) for (const d of g.dates) doneMap.set(`${g.product}|${d.date}`, d.count);
-
-      items = pend
-        .map((g) => {
-          const dates = g.dates
-            .map((d) => ({ date: d.date, count: Math.max(0, d.count - (doneMap.get(`${g.product}|${d.date}`) ?? 0)) }))
-            .filter((d) => d.count > 0);
-          return {
-            product: g.product,
-            product_key: g.product,
-            dates,
-            total: dates.reduce((s, d) => s + d.count, 0),
-          };
-        })
-        .filter((g) => g.total > 0);
+      items = subtractCompleted(pend, done).map((g) => ({
+        product: g.product,
+        product_key: g.product,
+        dates: g.dates,
+        total: g.total,
+      }));
     } else if (type === "code" || type === "code_done") {
       const vc = getVivaconSupabase();
       // 판매완료 = allocated(고객 할당) + exchanged(교환 처리) 둘 다
