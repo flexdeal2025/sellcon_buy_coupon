@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useRecords } from "@/hooks/use-records";
 import { usePhoneLines } from "@/hooks/use-phone-lines";
 import { usePresets } from "@/hooks/use-presets";
+import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { useWorker } from "@/hooks/use-worker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ export default function NewPurchasePage() {
   const { records, insert } = useRecords();
   const { lines } = usePhoneLines();
   const { suppliers, products } = usePresets();
+  const smartstoreProducts = useVivaconProducts();
   const { worker } = useWorker();
 
   const [date, setDate] = useState(toDateInput());
@@ -62,12 +64,16 @@ export default function NewPurchasePage() {
   const limitNum = Number(limitPer) || 0;
   const needCount = requiredLineCount(qtyNum, limitNum);
 
-  // 상품명 자동완성 후보 (입력값으로 필터링)
+  // 상품명 자동완성 후보: 스마트스토어 상품명 + 프리셋 병합(중복 제거), 입력값으로 필터링
+  const productPool = useMemo(
+    () => Array.from(new Set([...smartstoreProducts, ...products])),
+    [smartstoreProducts, products],
+  );
   const productSuggestions = useMemo(() => {
     const q = productName.toLowerCase().trim();
-    if (!q) return products.slice(0, 12);
-    return products.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
-  }, [products, productName]);
+    if (!q) return productPool.slice(0, 12);
+    return productPool.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
+  }, [productPool, productName]);
 
   // 활성 회선 sequence 목록
   const activeSeqs = useMemo(
@@ -195,7 +201,7 @@ export default function NewPurchasePage() {
             <div className="relative">
               <Input
                 ref={productInputRef}
-                placeholder="키워드 입력 (예: cu, 스타벅스)"
+                placeholder="스마트스토어 상품명 검색 (예: cu, 스타벅스)"
                 value={productName}
                 onChange={(e) => {
                   setProductName(e.target.value);
