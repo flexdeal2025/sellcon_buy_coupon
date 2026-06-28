@@ -17,7 +17,7 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
     const [{ data: regs, error: e1 }, { data: links, error: e2 }] = await Promise.all([
-      sb.from("stock_registrations").select("id, supplier, created_at, unit_cost, source"),
+      sb.from("stock_registrations").select("id, supplier, created_at, purchase_date, unit_cost, source"),
       sb.from("proof_registration_links").select("registration_id"),
     ]);
     if (e1) throw new Error(e1.message);
@@ -27,13 +27,15 @@ export async function GET() {
     // 셀콘(A경로)은 회원·정산·금액 정보가 시스템에 보존 → 별도 증빙 불필요(시스템 증빙)
     const isSystemProof = (source: string | null | undefined) => source === "sellcon";
 
-    // 등록일(created_at) 기준 집계 — 증빙 화면 날짜필터(등록일)와 동일 기준
+    // 매입일(purchase_date) 기준 집계 — 증빙은 '매입 행위'에 대한 것이므로 매입일로 묶는다.
+    // (자정 직후 등록 시 등록일과 매입일이 갈려 누락처럼 보이던 문제 방지.)
+    // purchase_date 없으면 등록일(created_at) KST로 폴백. 증빙 화면 날짜필터와 동일 기준.
     // 금액은 입력된 매입원가(unit_cost) 기준. missingAmt = 증빙 미확보 매입액(소명 리스크 금액)
     interface Agg { supplier: string; date: string; total: number; mapped: number; system: number; totalAmt: number; missingAmt: number }
     const map = new Map<string, Agg>();
     for (const r of regs ?? []) {
       const supplier = r.supplier || "(미지정)";
-      const date = kstDate(r.created_at);
+      const date = r.purchase_date || kstDate(r.created_at);
       const cost = Number(r.unit_cost) || 0;
       const key = `${supplier}__${date}`;
       const cur = map.get(key) ?? { supplier, date, total: 0, mapped: 0, system: 0, totalAmt: 0, missingAmt: 0 };
