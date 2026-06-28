@@ -59,12 +59,9 @@ export async function copyOcrToPending(
   return dest;
 }
 
-/** GIFTICON_BUCKET의 {folder}/{상품명}/{YYMMDD}/{파일명} 구조를 스캔해 상품명별로 집계.
- *  pending  = 판매 대기 이미지형 재고
- *  completed = 알림톡 발송 완료 (uuid 파일명으로 이동됨)
- */
+/** GIFTICON_BUCKET의 {folder}/{상품명}/{YYMMDD}/{파일명} 구조를 스캔해 상품명별로 집계 */
 async function scanGcpImageFolder(
-  folder: "pending" | "completed",
+  folder: "pending" | "completed" | "exchanged",
 ): Promise<Array<{ product: string; total: number; dates: Array<{ date: string; count: number }> }>> {
   const [files] = await client()
     .bucket(GIFTICON_BUCKET)
@@ -117,6 +114,9 @@ export const listPendingStock = () => scanGcpImageFolder("pending");
 
 /** 알림톡 발송 완료 이미지 재고 (completed/) 상품별 집계 */
 export const listCompletedStock = () => scanGcpImageFolder("completed");
+
+/** 교환 처리 완료 이미지 재고 (exchanged/) 상품별 집계 */
+export const listExchangedStock = () => scanGcpImageFolder("exchanged");
 
 /** pending/ 특정 상품+날짜의 파일 목록 */
 export const listPendingFiles = (product: string, date: string) =>
