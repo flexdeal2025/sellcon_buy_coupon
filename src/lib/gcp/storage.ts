@@ -70,8 +70,14 @@ async function scanGcpImageFolder(
   const map = new Map<string, Map<string, number>>();
   for (const f of files) {
     const parts = f.name.split("/");
-    // 실제 파일만: [folder, 상품명, YYMMDD, 파일명] — 디렉터리 마커(trailing /) 제외
+    // [folder, 상품명, YYMMDD, 파일명] 구조만 허용
+    // · 4개 미만 또는 파일명 없음 → 디렉터리 마커
+    // · 숨김파일(.keep, .DS_Store 등) → 폴더 생성 부산물
+    // · 0바이트 → GCP 폴더 마커 객체
     if (parts.length < 4 || !parts[3]) continue;
+    if (parts[3].startsWith(".")) continue;
+    const size = parseInt((f.metadata as { size?: string }).size ?? "0", 10);
+    if (size === 0) continue;
     const product = parts[1];
     const date = parts[2];
     if (!map.has(product)) map.set(product, new Map());
@@ -99,7 +105,10 @@ async function listGcpImageFiles(
   return files
     .filter((f) => {
       const parts = f.name.split("/");
-      return parts.length >= 4 && !!parts[3];
+      if (parts.length < 4 || !parts[3]) return false;
+      if (parts[3].startsWith(".")) return false;
+      const size = parseInt((f.metadata as { size?: string }).size ?? "0", 10);
+      return size > 0;
     })
     .map((f) => ({
       name: f.name.split("/").pop() ?? f.name,
