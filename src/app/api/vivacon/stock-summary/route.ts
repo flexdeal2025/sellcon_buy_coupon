@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
 import { listPendingStock, listCompletedStock, listExchangedStock } from "@/lib/gcp/storage";
-import { mergeProductDates, subtractCompleted } from "@/lib/stock-net";
+import { mergeProductDates } from "@/lib/stock-net";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -71,12 +71,9 @@ export async function GET(req: Request) {
     let items: StockItem[] = [];
 
     if (type === "image") {
-      // 재고 = pending − (completed + exchanged): 발송 후 pending에서 미삭제되므로 차감
-      const [pend, done, exchanged] = await Promise.all([
-        listPendingStock(), listCompletedStock(), listExchangedStock(),
-      ]);
-      const sold = mergeProductDates(done, exchanged);
-      items = sortByProductName(gcpToStockItems(subtractCompleted(pend, sold)));
+      // pending 폴더 파일 수 그대로 집계
+      const pend = await listPendingStock();
+      items = sortByProductName(gcpToStockItems(pend));
     } else if (type === "image_done") {
       // completed + exchanged 폴더 합산
       const [done, exchanged] = await Promise.all([listCompletedStock(), listExchangedStock()]);
