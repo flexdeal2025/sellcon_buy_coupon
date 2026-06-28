@@ -224,9 +224,22 @@ export function VivaconProofPanel() {
     await Promise.all([fetchProofs(), fetchInventory()]);
   };
 
-  // 등록일 날짜 필터 (표시 등록일과 동일하게 클라이언트에서 — TZ 오차 회피)
+  // 매입일 수동 수정 (자정 직후 등록·OCR 오인식 등 보정용)
+  const patchPurchaseDate = async (rid: string, date: string) => {
+    const res = await fetch("/api/stock/registration", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+      body: JSON.stringify({ id: rid, patch: { purchase_date: date || "" } }),
+    });
+    const json = await res.json();
+    if (!json.ok) { toast.error("매입일 수정 실패: " + json.error); return; }
+    toast.success("매입일 수정됨");
+    await fetchInventory();
+  };
+
+  // 매입일 기준(없으면 등록일 KST 폴백) — 리포트·필터·표시 모두 동일 기준
+  const regDate = (r: Reg) => r.purchase_date || toKST(r.created_at, true);
   const displayedInventory = dateFilter
-    ? inventory.filter((r) => toKST(r.created_at, true) === dateFilter)
+    ? inventory.filter((r) => regDate(r) === dateFilter)
     : inventory;
   const total = displayedInventory.length;
   // 셀콘(A경로)은 시스템 자체 증빙 → 증빙 확보로 간주
@@ -249,7 +262,7 @@ export function VivaconProofPanel() {
           <option value="true">연결완료</option>
         </select>
         <div className="flex items-center gap-1">
-          <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" title="등록일 기준" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+          <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" title="매입일 기준" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
           {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-muted-foreground hover:text-foreground">날짜해제</button>}
         </div>
         <span className="text-sm">재고 <strong>{total}</strong> · 증빙연결 <strong className="text-green-600">{mapped}</strong>{systemCovered > 0 && <> · 시스템증빙 <strong className="text-blue-600">{systemCovered}</strong></>} · 미연결 <strong className="text-amber-600">{unmappedReal}</strong></span>
@@ -261,7 +274,7 @@ export function VivaconProofPanel() {
       {showReport && (
         <div className="rounded-xl border border-border">
           <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-3 py-2">
-            <span className="text-sm font-medium">증빙 누락 리포트 (매입처 × 등록일) · 행 클릭 시 해당 조건으로 필터</span>
+            <span className="text-sm font-medium">증빙 누락 리포트 (매입처 × 매입일) · 행 클릭 시 해당 조건으로 필터</span>
             <button onClick={() => setShowReport(false)} className="text-xs text-muted-foreground hover:text-foreground">닫기</button>
           </div>
           {reportMissingCnt > 0 && (
@@ -281,7 +294,7 @@ export function VivaconProofPanel() {
               <thead className="border-b border-border bg-secondary/30">
                 <tr>
                   <th className="px-3 py-1.5 text-left">매입처</th>
-                  <th className="px-3 py-1.5 text-left">등록일</th>
+                  <th className="px-3 py-1.5 text-left">매입일</th>
                   <th className="px-3 py-1.5 text-right">전체</th>
                   <th className="px-3 py-1.5 text-right">연결</th>
                   <th className="px-3 py-1.5 text-right">시스템증빙</th>
@@ -443,7 +456,7 @@ export function VivaconProofPanel() {
                   <th className="px-2 py-1.5 text-left">매입처</th>
                   <th className="px-2 py-1.5 text-left">쿠폰번호</th>
                   <th className="px-2 py-1.5 text-left">유효기간</th>
-                  <th className="px-2 py-1.5 text-left">등록일</th>
+                  <th className="px-2 py-1.5 text-left">매입일</th>
                   <th className="px-2 py-1.5 text-center">증빙</th>
                 </tr>
               </thead>
@@ -464,7 +477,12 @@ export function VivaconProofPanel() {
                     <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.supplier || undefined}>{r.supplier || "-"}</td>
                     <td className="px-2 py-1.5 font-mono truncate max-w-28" title={r.coupon_code}>{r.coupon_code}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{r.expiry_date ?? "-"}</td>
-                    <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground" title={r.purchase_date ? `매입일 ${r.purchase_date}` : undefined}>{toKST(r.created_at, true) || "-"}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      <input type="date" value={r.purchase_date ?? ""}
+                        title={`등록일시 ${toKST(r.created_at)} (클릭해 매입일 수정)`}
+                        onChange={(e) => patchPurchaseDate(r.id, e.target.value)}
+                        className="rounded border border-border bg-background px-1 py-0.5 text-xs tabular-nums" />
+                    </td>
                     <td className="px-2 py-1.5 text-center">
                       {r.proof_id ? (
                         <button onClick={() => unlink(r.id)} title="연결 해제" className="inline-flex items-center gap-0.5 text-green-600 hover:text-destructive">
