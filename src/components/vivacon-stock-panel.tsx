@@ -36,6 +36,20 @@ interface Reg {
 const QUALITY_COLOR: Record<string, string> = {
   high: "text-success", medium: "text-warning", low: "text-destructive",
 };
+
+// OCR 저신뢰 기준 (확신도 70 미만 = 값 직접 확인 필요)
+const LOW_CONF = 70;
+const isLowConf = (r: Reg) => (r.ocr_confidence ?? 0) < LOW_CONF;
+
+// 승인(=발행 후보) 전 필수값 검증. 통과 못하면 사유 문자열, 통과면 null.
+// 발행 라우트가 실패시키는 항목을 검수 단계에서 미리 막아 헛발행 방지.
+function validateForApprove(r: Reg): string | null {
+  if (!r.product_name.trim()) return "상품명 미입력";
+  if (!r.coupon_code.trim()) return "쿠폰번호 미입력";
+  if (!r.expiry_date) return "유효기간 미입력";
+  if (!r.stored_as_code && !r.image_url) return "이미지 없음(이미지형 발행 불가)";
+  return null;
+}
 type BulkField = "product_name" | "option_name" | "expiry_date" | "supplier" | "unit_cost" | "stored_as_code";
 interface Vendor { name: string; name_en: string }
 
@@ -271,6 +285,8 @@ export function VivaconStockPanel() {
   const setStatus = async (r: Reg, status: "approved" | "pending") => {
     // 승인 시 현재 카드 상태(발행형태 포함)를 먼저 저장하여 UI 변경이 DB에 반영되도록 함
     if (status === "approved") {
+      const err = validateForApprove(r);
+      if (err) { toast.error(`승인 불가 — ${err}`); return; }
       const saveRes = await fetch("/api/stock/registration", {
         method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
         body: JSON.stringify({ id: r.id, patch: cardPatch(r) }),
@@ -324,10 +340,14 @@ export function VivaconStockPanel() {
   const approveSelected = async () => {
     const targets = rows.filter((r) => selected.has(r.id) && !r.published && r.inspection_status !== "approved");
     if (targets.length === 0) { toast.error("승인할 미승인 카드를 선택하세요"); return; }
+    // 필수값(상품명·쿠폰번호·유효기간·이미지) 통과 카드만 승인 — 미충족분은 제외
+    const valid = targets.filter((r) => !validateForApprove(r));
+    const skipped = targets.length - valid.length;
+    if (valid.length === 0) { toast.error(`승인 가능 카드 없음 — 필수값(상품명·쿠폰번호·유효기간) 확인 (${skipped}건 누락)`); return; }
     setBusy(true);
     try {
       const results = await Promise.all(
-        targets.map(async (r) => {
+        valid.map(async (r) => {
           const res = await fetch("/api/stock/registration", {
             method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
             body: JSON.stringify({ id: r.id, patch: { inspection_status: "approved" } }),
@@ -338,7 +358,9 @@ export function VivaconStockPanel() {
         })
       );
       const ok = results.filter(Boolean).length;
-      toast.success(`${ok}건 승인${ok < targets.length ? ` / 실패 ${targets.length - ok}` : ""}`);
+      const failMsg = ok < valid.length ? ` / 실패 ${valid.length - ok}` : "";
+      const skipMsg = skipped > 0 ? ` · 필수값 누락 ${skipped}건 제외` : "";
+      toast.success(`${ok}건 승인${failMsg}${skipMsg}`);
     } finally {
       setBusy(false);
     }
@@ -648,7 +670,8 @@ export function VivaconStockPanel() {
         {displayRows.map((r) => (
           <div key={r.id} className={cn("flex gap-3 rounded-xl border p-3",
             r.published ? "border-green-500/40 bg-green-50/40 dark:bg-green-950/10" :
-            r.inspection_status === "approved" ? "border-primary/40 bg-primary/5" : "border-border")}>
+            r.inspection_status === "approved" ? "border-primary/40 bg-primary/5" :
+            isLowConf(r) ? "border-warning/50 bg-warning/5" : "border-border")}>
             {/* 이미지 (클릭 → 라이트박스) */}
             <button type="button" onClick={() => { setLightbox(r.image_url); setScale(1); }} className="shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -659,6 +682,9 @@ export function VivaconStockPanel() {
               onKeyDown={(e) => { if (e.key === "Enter" && !r.published && e.target instanceof HTMLInputElement) saveRow(r); }}>
               <div className="flex items-center gap-2 text-xs">
                 <span className={cn("font-medium", QUALITY_COLOR[r.extraction_quality])}>OCR {r.ocr_confidence ?? 0}점</span>
+                {!r.published && isLowConf(r) && (
+                  <span className="rounded bg-warning/15 px-1 font-medium text-warning" title="OCR 확신도 낮음 — 값 직접 확인 후 승인">⚠ 저신뢰 확인</span>
+                )}
                 {r.source === "sellcon" && (
                   <span className="rounded bg-blue-100 px-1 font-medium text-blue-600 dark:bg-blue-950/40" title={r.seller_name_masked ? `셀콘 자동매입 · 매도자 ${r.seller_name_masked}` : "셀콘 자동매입"}>셀콘</span>
                 )}
