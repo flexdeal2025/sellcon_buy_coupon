@@ -14,6 +14,7 @@ import {
   Boxes,
   ScanLine,
   ReceiptText,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SupabaseBanner } from "@/components/supabase-banner";
@@ -68,6 +69,13 @@ const NAV: NavGroup[] = [
     icon: ReceiptText,
     href: "/proof",
     match: ["/proof"],
+  },
+  {
+    key: "trace",
+    label: "이력조회",
+    icon: History,
+    href: "/trace",
+    match: ["/trace"],
   },
   {
     key: "settings",
