@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getVivaconSupabase, checkAppPasscode } from "@/lib/supabase/vivacon";
-import { listPendingStock, listCompletedStock } from "@/lib/gcp/storage";
-import { subtractCompleted } from "@/lib/stock-net";
+import { listPendingStock, listCompletedStock, listExchangedStock } from "@/lib/gcp/storage";
+import { mergeProductDates } from "@/lib/stock-net";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -16,6 +16,27 @@ type StockItem = {
 
 type CouponRow = { 상품명: string | null; expiry_yymmdd: string | null };
 
+/** 영문(A-Z) → 한글(ㄱ-ㅎ) 오름차순 정렬 */
+function sortByProductName(items: StockItem[]): StockItem[] {
+  return [...items].sort((a, b) => {
+    const aKo = /^[가-힣]/.test(a.product);
+    const bKo = /^[가-힣]/.test(b.product);
+    if (aKo !== bKo) return aKo ? 1 : -1;
+    return a.product.localeCompare(b.product, aKo ? "ko" : "en");
+  });
+}
+
+function gcpToStockItems(
+  groups: Array<{ product: string; total: number; dates: DateCount[] }>,
+): StockItem[] {
+  return groups.map((g) => ({
+    product: g.product,
+    product_key: g.product.replace(/\//g, "_"),
+    dates: g.dates,
+    total: g.total,
+  }));
+}
+
 function buildMapItems(
   rows: Array<{ product: string; date: string }>,
 ): StockItem[] {
@@ -25,19 +46,17 @@ function buildMapItems(
     const dm = map.get(r.product)!;
     dm.set(r.date, (dm.get(r.date) ?? 0) + 1);
   }
-  return Array.from(map.entries())
-    .map(([product, dm]) => {
-      const dates = Array.from(dm.entries())
-        .map(([date, count]) => ({ date, count }))
-        .sort((a, b) => a.date.localeCompare(b.date));
-      return {
-        product,
-        product_key: product.replace(/\//g, "_"),
-        dates,
-        total: dates.reduce((s, d) => s + d.count, 0),
-      };
-    })
-    .sort((a, b) => b.total - a.total);
+  return Array.from(map.entries()).map(([product, dm]) => {
+    const dates = Array.from(dm.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    return {
+      product,
+      product_key: product.replace(/\//g, "_"),
+      dates,
+      total: dates.reduce((s, d) => s + d.count, 0),
+    };
+  });
 }
 
 export async function GET(req: Request) {
@@ -52,19 +71,16 @@ export async function GET(req: Request) {
     let items: StockItem[] = [];
 
     if (type === "image") {
-      // 판매중 = pending − completed (상품×유효기간별 차감).
-      // 발송 후 completed로 복사되지만 pending에서 삭제되지 않아, 차감해야 순수 판매중만 남는다.
-      const [pend, done] = await Promise.all([listPendingStock(), listCompletedStock()]);
-      items = subtractCompleted(pend, done).map((g) => ({
-        product: g.product,
-        product_key: g.product,
-        dates: g.dates,
-        total: g.total,
-      }));
+      // pending 폴더 파일 수 그대로 집계
+      const pend = await listPendingStock();
+      items = sortByProductName(gcpToStockItems(pend));
+    } else if (type === "image_done") {
+      // completed + exchanged 폴더 합산
+      const [done, exchanged] = await Promise.all([listCompletedStock(), listExchangedStock()]);
+      items = sortByProductName(gcpToStockItems(mergeProductDates(done, exchanged)));
     } else if (type === "code" || type === "code_done") {
       const vc = getVivaconSupabase();
-      // 판매완료 = allocated(고객 할당) + exchanged(교환 처리) 둘 다
-      const statuses = type === "code" ? ["available"] : ["allocated", "exchanged"];
+      const statuses = type === "code" ? ["available"] : ["completed", "exchanged"];
       const { data, error } = await vc
         .from("coupon_codes")
         .select("상품명, expiry_yymmdd")
@@ -76,16 +92,7 @@ export async function GET(req: Request) {
         product: c.상품명 ?? "(상품명 없음)",
         date: c.expiry_yymmdd ?? "000000",
       }));
-      items = buildMapItems(rows);
-    } else if (type === "image_done") {
-      // GCP completed/ 폴더 스캔 — 알림톡 발송 완료 후 uuid 파일명으로 이동된 항목
-      const gcpItems = await listCompletedStock();
-      items = gcpItems.map((g) => ({
-        product: g.product,
-        product_key: g.product,
-        dates: g.dates,
-        total: g.total,
-      }));
+      items = sortByProductName(buildMapItems(rows));
     } else {
       return NextResponse.json({ ok: false, error: "type 오류" }, { status: 400 });
     }

@@ -9,6 +9,25 @@ export interface ProductDates {
   dates: Array<{ date: string; count: number }>;
 }
 
+/** 두 ProductDates 배열을 상품×유효기간별로 합산 (completed + exchanged 등 폴더 합치기용). */
+export function mergeProductDates(
+  a: ProductDates[],
+  b: ProductDates[],
+): ProductDates[] {
+  const map = new Map<string, Map<string, number>>();
+  for (const g of [...a, ...b]) {
+    if (!map.has(g.product)) map.set(g.product, new Map());
+    const dm = map.get(g.product)!;
+    for (const d of g.dates) dm.set(d.date, (dm.get(d.date) ?? 0) + d.count);
+  }
+  return Array.from(map.entries()).map(([product, dm]) => {
+    const dates = Array.from(dm.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    return { product, total: dates.reduce((s, d) => s + d.count, 0), dates };
+  });
+}
+
 /** pending에서 completed 수만큼 (상품×유효기간별) 차감. 0 이하 클램프, 0 그룹 제거. */
 export function subtractCompleted(
   pending: ProductDates[],
