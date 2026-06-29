@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { cn, toKST } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2, Trash2 } from "lucide-react";
+import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2, Trash2, Search } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
@@ -55,7 +55,7 @@ export function VivaconProofPanel() {
   const [reportSystemCnt, setReportSystemCnt] = useState(0);
   const [showReport, setShowReport] = useState(false);
   const loadReport = async () => {
-    const res = await fetch("/api/proof/report");
+    const res = await fetch("/api/proof/report", { cache: "no-store" });
     const json = await res.json();
     if (json.ok) {
       setReport(json.rows);
@@ -74,7 +74,7 @@ export function VivaconProofPanel() {
   }, []);
 
   const fetchProofs = useCallback(async () => {
-    const res = await fetch("/api/proofs");
+    const res = await fetch("/api/proofs", { cache: "no-store" });
     const json = await res.json();
     if (json.ok) setProofs(json.rows);
   }, []);
@@ -83,7 +83,9 @@ export function VivaconProofPanel() {
     const params = new URLSearchParams();
     if (supplier) params.set("supplier", supplier);
     if (mappedFilter) params.set("mapped", mappedFilter);
-    const res = await fetch(`/api/proof/inventory?${params}`);
+    // no-store: 매핑 직후 재조회 시 브라우저 캐시된(매핑 전) 응답이 와서
+    // 연결된 건이 '미연결' 필터에 계속 남던 문제 방지
+    const res = await fetch(`/api/proof/inventory?${params}`, { cache: "no-store" });
     const json = await res.json();
     if (json.ok) setInventory(json.rows);
   }, [supplier, mappedFilter]);
@@ -265,9 +267,13 @@ export function VivaconProofPanel() {
           <input type="date" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" title="매입일 기준" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
           {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-muted-foreground hover:text-foreground">날짜해제</button>}
         </div>
+        <button onClick={() => { fetchProofs(); fetchInventory(); }}
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90">
+          <Search className="h-4 w-4" /> 조회
+        </button>
         <span className="text-sm">재고 <strong>{total}</strong> · 증빙연결 <strong className="text-green-600">{mapped}</strong>{systemCovered > 0 && <> · 시스템증빙 <strong className="text-blue-600">{systemCovered}</strong></>} · 미연결 <strong className="text-amber-600">{unmappedReal}</strong></span>
-        <button onClick={loadReport} className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">누락 리포트</button>
-        <button onClick={() => { fetchProofs(); fetchInventory(); }} className="ml-auto rounded-lg border border-border bg-background px-2 py-1.5 text-sm"><RefreshCw className="h-3.5 w-3.5" /></button>
+        <button onClick={loadReport} className="ml-auto rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary">누락 리포트</button>
+        <button onClick={() => { fetchProofs(); fetchInventory(); }} title="새로고침" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm hover:bg-secondary"><RefreshCw className="h-3.5 w-3.5" /></button>
       </div>
 
       {/* 누락 리포트 (매입처 × 매입일) */}
