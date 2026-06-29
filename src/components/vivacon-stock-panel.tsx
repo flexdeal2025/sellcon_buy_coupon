@@ -29,6 +29,7 @@ interface Reg {
   published: boolean;
   product_slug: string;
   dup?: boolean;
+  dup_reason?: string;          // 중복 사유(배지 툴팁)
   source?: string;              // manual | telegram | sellcon
   seller_name_masked?: string;  // 셀콘 직결 건의 매도자 마스킹명
 }
@@ -720,7 +721,7 @@ export function VivaconStockPanel() {
                 {r.source === "sellcon" && (
                   <span className="rounded bg-blue-100 px-1 font-medium text-blue-600 dark:bg-blue-950/40" title={r.seller_name_masked ? `셀콘 자동매입 · 매도자 ${r.seller_name_masked}` : "셀콘 자동매입"}>셀콘</span>
                 )}
-                {r.dup && !r.published && <span className="rounded bg-red-100 px-1 font-medium text-red-600 dark:bg-red-950/40" title="이미 비바콘 재고에 있는 쿠폰번호">⚠️중복</span>}
+                {r.dup && !r.published && <span className="rounded bg-red-100 px-1 font-medium text-red-600 dark:bg-red-950/40" title={r.dup_reason || "중복 쿠폰번호"}>⚠️중복</span>}
                 {r.published && <span className="text-green-600 font-medium">✅발행됨</span>}
                 <label className="ml-auto flex items-center gap-1">
                   <input type="checkbox" checked={selected.has(r.id)} disabled={r.published}
