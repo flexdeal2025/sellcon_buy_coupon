@@ -366,6 +366,30 @@ export function VivaconStockPanel() {
     }
   };
 
+  // 선택 카드 일괄 승인취소 — 승인된·미발행 건을 pending(검수대기)으로 되돌림
+  const unapproveSelected = async () => {
+    const targets = rows.filter((r) => selected.has(r.id) && !r.published && r.inspection_status === "approved");
+    if (targets.length === 0) { toast.error("승인취소할 '승인' 상태 카드를 선택하세요"); return; }
+    setBusy(true);
+    try {
+      const results = await Promise.all(
+        targets.map(async (r) => {
+          const res = await fetch("/api/stock/registration", {
+            method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
+            body: JSON.stringify({ id: r.id, patch: { inspection_status: "pending" } }),
+          });
+          const json = await res.json();
+          if (json.ok) updateRow(r.id, { inspection_status: "pending" });
+          return json.ok;
+        })
+      );
+      const ok = results.filter(Boolean).length;
+      toast.success(`${ok}건 승인취소${ok < targets.length ? ` / 실패 ${targets.length - ok}` : ""}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // 현재 보기의 미발행 카드 전체 선택 / 선택 해제
   const selectAll = () => setSelected(new Set(rows.filter((r) => !r.published).map((r) => r.id)));
   const clearSelection = () => setSelected(new Set());
@@ -393,14 +417,17 @@ export function VivaconStockPanel() {
     if (targets.length === 0) { toast.error("미발행 카드를 선택하세요"); return; }
     if (bulkField === "expiry_date" && bulkValue && !/^\d{4}-\d{2}-\d{2}$/.test(bulkValue)) { toast.error("유효기간 형식 YYYY-MM-DD"); return; }
     if (bulkField === "unit_cost" && bulkValue.trim() && !/^[\d,]+$/.test(bulkValue.trim())) { toast.error("매입원가는 숫자만 입력하세요"); return; }
-    // 발행형태(boolean)는 code/image → stored_as_code 로 변환
-    const patch: Record<string, unknown> = bulkField === "stored_as_code"
-      ? { stored_as_code: bulkValue === "code" }
-      : { [bulkField]: bulkValue };
     setBusy(true);
     try {
       const results = await Promise.all(
         targets.map(async (r) => {
+          // 일괄 대상 필드. 발행형태는 code/image→boolean, 상품명은 사전 영문명도 함께 매핑.
+          const fieldPatch: Record<string, unknown> =
+            bulkField === "stored_as_code" ? { stored_as_code: bulkValue === "code" }
+            : bulkField === "product_name" ? (slugMap[bulkValue] ? { product_name: bulkValue, product_slug: slugMap[bulkValue] } : { product_name: bulkValue })
+            : { [bulkField]: bulkValue };
+          // 현재 화면값 전체(cardPatch)를 함께 저장 → 미저장 편집(상품명 등)이 일괄변경으로 원복되지 않게
+          const patch = { ...cardPatch(r), ...fieldPatch };
           const res = await fetch("/api/stock/registration", {
             method: "PATCH", headers: { "Content-Type": "application/json", ...AUTH },
             body: JSON.stringify({ id: r.id, patch }),
@@ -652,6 +679,11 @@ export function VivaconStockPanel() {
           {selected.size > 0 && (
             <button onClick={approveSelected} disabled={busy} className="ml-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/20 disabled:opacity-50">
               <CheckCircle2 className="h-4 w-4" /> 선택 승인
+            </button>
+          )}
+          {selected.size > 0 && (
+            <button onClick={unapproveSelected} disabled={busy} title="선택한 '승인' 카드를 검수대기로 되돌립니다" className="flex items-center gap-1 rounded-lg border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning hover:bg-warning/20 disabled:opacity-50">
+              <RotateCcw className="h-4 w-4" /> 선택 승인취소
             </button>
           )}
           {selected.size > 0 && (
