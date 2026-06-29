@@ -244,6 +244,12 @@ export function VivaconProofPanel() {
     ? inventory.filter((r) => regDate(r) === dateFilter)
     : inventory;
   const total = displayedInventory.length;
+  // 좌측 증빙도 우측 재고와 동일한 연결상태 필터 적용 (미연결만이면 이미 연결된 증빙 숨김)
+  const displayedProofs = proofs.filter((p) =>
+    mappedFilter === "false" ? p.linked_count === 0
+    : mappedFilter === "true" ? p.linked_count > 0
+    : true,
+  );
   // 셀콘(A경로)은 시스템 자체 증빙 → 증빙 확보로 간주
   const isSystemProof = (r: Reg) => r.source === "sellcon";
   const mapped = displayedInventory.filter((r) => r.proof_id).length;
@@ -366,7 +372,7 @@ export function VivaconProofPanel() {
             </div>
           )}
 
-          {proofs.map((p) => {
+          {displayedProofs.map((p) => {
             const amt = p.amount ?? null;
             const matched = amt != null && p.linked_count > 0 && amt === p.linked_cost;
             const mismatch = amt != null && p.linked_count > 0 && amt !== p.linked_cost;
@@ -405,7 +411,11 @@ export function VivaconProofPanel() {
             </div>
             );
           })}
-          {proofs.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">업로드된 증빙이 없습니다.</p>}
+          {displayedProofs.length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {proofs.length === 0 ? "업로드된 증빙이 없습니다." : mappedFilter === "false" ? "미연결 증빙이 없습니다." : mappedFilter === "true" ? "연결완료된 증빙이 없습니다." : "증빙이 없습니다."}
+            </p>
+          )}
         </div>
 
         {/* 우: 재고 */}
