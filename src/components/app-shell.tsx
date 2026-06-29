@@ -107,7 +107,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-border bg-background/80 px-4 backdrop-blur">
         <Link href="/" className="flex shrink-0 items-center gap-2 whitespace-nowrap font-bold">
           <span className="text-lg">🎟️</span>
-          <span>기프티콘 매입</span>
+          <span>기프티콘 사업 관리</span>
         </Link>
         {/* 데스크톱 네비게이션 */}
         <nav className="hidden min-w-0 gap-0.5 overflow-x-auto sm:flex">
