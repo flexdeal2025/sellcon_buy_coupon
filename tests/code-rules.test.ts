@@ -1,36 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { checkCodeDigits, digitCount } from "@/lib/code-rules";
+import { checkCodeLength, codeLength } from "@/lib/code-rules";
 
-describe("checkCodeDigits — 배민상품권 10자리 규칙", () => {
-  it("배민상품권 + 정확히 10자리 숫자 → 정상(null)", () => {
-    expect(checkCodeDigits("배민상품권 3만원 교환권", "1234567890")).toBeNull();
+describe("checkCodeLength — 배민상품권 10자리(글자 수) 규칙", () => {
+  it("배민상품권 + 10자리 영문+숫자 혼합 → 정상(null)", () => {
+    // 실제 배민 코드 형태: 영문+숫자 10글자 (이게 오탐나던 핵심 케이스)
+    expect(checkCodeLength("배민상품권 3만원 교환권", "K9ABC1D2ET")).toBeNull();
+    expect(checkCodeLength("배달의민족 배민상품권 5만원 교환권", "KA12B34C56")).toBeNull();
+  });
+
+  it("배민상품권 + 순수 10자리 숫자 → 정상(null)", () => {
+    expect(checkCodeLength("배민상품권", "1234567890")).toBeNull();
   });
 
   it("배민상품권 + 9자리 → 오인식 경고", () => {
-    const w = checkCodeDigits("배민상품권 3만원 교환권", "123456789");
+    const w = checkCodeLength("배민상품권 3만원 교환권", "K9ABC1D2E");
     expect(w).not.toBeNull();
     expect(w?.actual).toBe(9);
     expect(w?.expected).toEqual([10]);
   });
 
   it("배민상품권 + 11자리 → 오인식 경고", () => {
-    expect(checkCodeDigits("배달의민족 배민상품권 5만원 교환권", "12345678901")?.actual).toBe(11);
+    expect(checkCodeLength("배민상품권", "K9ABC1D2ETX")?.actual).toBe(11);
   });
 
-  it("배민상품권 + 10자리지만 문자 섞임(numericOnly) → 경고", () => {
-    // 숫자 10개지만 문자 포함 → 숫자전용 위반
-    expect(checkCodeDigits("배민상품권", "12345A67890")).not.toBeNull();
+  it("공백은 제거하고 길이 판정 (OCR 잔여공백 방어)", () => {
+    expect(checkCodeLength("배민상품권", "K9ABC 1D2ET")).toBeNull(); // 공백 제거 시 10
   });
 
   it("규칙 없는 상품 → null", () => {
-    expect(checkCodeDigits("스타벅스 5만원권", "12345")).toBeNull();
+    expect(checkCodeLength("스타벅스 5만원권", "ABC")).toBeNull();
   });
 
-  it("코드 미입력 → null (필수값 검증이 따로 처리)", () => {
-    expect(checkCodeDigits("배민상품권", "")).toBeNull();
+  it("코드 미입력 → null", () => {
+    expect(checkCodeLength("배민상품권", "")).toBeNull();
   });
 
-  it("digitCount는 숫자만 센다", () => {
-    expect(digitCount("12-34 56AB")).toBe(6);
+  it("codeLength는 공백 제거 후 글자 수", () => {
+    expect(codeLength("K9 AB-12")).toBe(7);
   });
 });
