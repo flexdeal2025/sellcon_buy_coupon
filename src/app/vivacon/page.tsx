@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { VivaconInventoryPanel } from "@/components/vivacon-inventory-panel";
 import { VivaconStockSummaryPanel } from "@/components/vivacon-stock-summary-panel";
+import { SmartstoreStockPlanPanel } from "@/components/smartstore-stock-plan-panel";
 
-type Tab = "overview" | "detail";
+type Tab = "overview" | "detail" | "ss-sync";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "재고 현황" },
   { key: "detail", label: "코드 재고 상세" },
+  { key: "ss-sync", label: "스마트스토어 동기화" },
 ];
 
 export default function VivaconPage() {
@@ -42,6 +44,7 @@ export default function VivaconPage() {
 
       {tab === "overview" && <VivaconStockSummaryPanel />}
       {tab === "detail" && <VivaconInventoryPanel />}
+      {tab === "ss-sync" && <SmartstoreStockPlanPanel />}
     </div>
   );
 }
