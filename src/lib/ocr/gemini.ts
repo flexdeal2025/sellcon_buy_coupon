@@ -2,6 +2,8 @@
  * Gemini 기반 기프티콘 OCR (서버 전용).
  * 이미지에서 상품명·쿠폰번호·유효기간·교환처를 추출.
  */
+import { ocrDigitHint } from "@/lib/code-rules";
+
 export interface OcrResult {
   product_name: string;
   coupon_code: string;
@@ -92,7 +94,10 @@ export async function ocrGifticon(
   imageBase64: string,
   mimeType: string,
 ): Promise<{ result: OcrResult; raw: unknown }> {
-  const { parsed, raw } = await geminiVisionJson(PROMPT, imageBase64, mimeType);
+  // 상품별 자리수 규칙을 프롬프트에 덧붙여 제미나이가 해당 자리수로 정확히 읽도록 유도
+  const hint = ocrDigitHint();
+  const prompt = hint ? `${PROMPT}\n${hint}` : PROMPT;
+  const { parsed, raw } = await geminiVisionJson(prompt, imageBase64, mimeType);
   const p = parsed as Partial<OcrResult>;
   const expiry = String(p.expiry_date ?? "").trim();
   return {
