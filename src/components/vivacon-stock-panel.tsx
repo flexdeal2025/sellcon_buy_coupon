@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { stripVivacon } from "@/hooks/use-vivacon-products";
+import { checkCodeDigits } from "@/lib/code-rules";
 import { Upload, Loader2, Save, CheckCircle2, RotateCcw, Send, RefreshCw, StopCircle, Trash2, ZoomIn, ZoomOut, X, Sparkles } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
@@ -722,6 +723,15 @@ export function VivaconStockPanel() {
                   <span className="rounded bg-blue-100 px-1 font-medium text-blue-600 dark:bg-blue-950/40" title={r.seller_name_masked ? `셀콘 자동매입 · 매도자 ${r.seller_name_masked}` : "셀콘 자동매입"}>셀콘</span>
                 )}
                 {r.dup && !r.published && <span className="rounded bg-red-100 px-1 font-medium text-red-600 dark:bg-red-950/40" title={r.dup_reason || "중복 쿠폰번호"}>⚠️중복</span>}
+                {!r.published && (() => {
+                  const w = checkCodeDigits(r.product_name, r.coupon_code);
+                  return w ? (
+                    <span className="rounded bg-orange-100 px-1 font-medium text-orange-600 dark:bg-orange-950/40"
+                      title={`${w.label} 쿠폰번호는 ${w.expected.join("/")}자리여야 하는데 현재 ${w.actual}자리 — OCR 오인식 의심, 재확인 필요`}>
+                      ⚠ 자리수 오인식
+                    </span>
+                  ) : null;
+                })()}
                 {r.published && <span className="text-green-600 font-medium">✅발행됨</span>}
                 <label className="ml-auto flex items-center gap-1">
                   <input type="checkbox" checked={selected.has(r.id)} disabled={r.published}
