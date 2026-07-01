@@ -94,6 +94,34 @@ export function InventoryDetail({ record, onUpdate, onDelete, onClose }: Props) 
     }
   }
 
+  // 입고 기록 삭제 (잘못 입력한 입고 건 되돌리기). displayIdx는 역순 표시 기준.
+  async function deleteDelivery(displayIdx: number) {
+    const orig = record.delivery_logs ?? [];
+    const origIdx = orig.length - 1 - displayIdx; // 표시(logs)는 reverse됨 → 원본 인덱스로 환산
+    const target = orig[origIdx];
+    if (!target) return;
+    if (!confirm(`이 입고 기록(+${target.quantity}개 · ${target.date})을 삭제할까요?\n입고 누적수량에서 차감됩니다.`)) return;
+    setBusy(true);
+    // 남은 기록 합으로 누적수량 재계산(차감 드리프트 방지)
+    const next = orig.filter((_, idx) => idx !== origIdx);
+    const newReceived = next.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+    const newStatus: PurchaseStatus =
+      newReceived === 0 ? "매입등록" : record.status === "완료" ? "재고확인중" : record.status;
+    try {
+      await onUpdate(record.id, {
+        delivery_logs: next,
+        received_quantity: newReceived,
+        status: newStatus,
+        status_updated_by: worker,
+      });
+      toast.success(`입고 기록 삭제됨 (누적 ${newReceived}개)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "삭제 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function changeStatus(status: PurchaseStatus, note?: string) {
     setBusy(true);
     try {
@@ -396,6 +424,14 @@ export function InventoryDetail({ record, onUpdate, onDelete, onClose }: Props) 
                       <Badge variant="outline" className="ml-auto text-[10px]">
                         {log.worker}
                       </Badge>
+                      <button
+                        onClick={() => deleteDelivery(i)}
+                        disabled={busy}
+                        title="이 입고 기록 삭제 (누적수량 차감)"
+                        className="text-muted-foreground hover:text-destructive disabled:opacity-40"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                     {log.note && (
                       <p className="mt-0.5 text-sm text-muted-foreground">{log.note}</p>
