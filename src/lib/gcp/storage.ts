@@ -41,6 +41,15 @@ export async function uploadProofImage(destPath: string, buffer: Buffer, content
   return destPath;
 }
 
+/** OCR 버킷 이미지 바이트 다운로드 (편집기 캔버스용 — 동일출처 프록시로 제공해 canvas 오염 방지) */
+export async function getOcrImageBytes(path: string): Promise<{ buffer: Buffer; contentType: string }> {
+  const file = client().bucket(OCR_BUCKET).file(path);
+  const [buffer] = await file.download();
+  let contentType = "image/jpeg";
+  try { const [meta] = await file.getMetadata(); if (meta.contentType) contentType = String(meta.contentType); } catch { /* 메타 실패 무시 */ }
+  return { buffer, contentType };
+}
+
 /** OCR 버킷 이미지 삭제 (best-effort) */
 export async function deleteOcrImage(path: string): Promise<void> {
   if (!path) return;
