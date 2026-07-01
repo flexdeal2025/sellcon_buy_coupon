@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { stripVivacon } from "@/hooks/use-vivacon-products";
 import { checkCodeLength } from "@/lib/code-rules";
-import { Upload, Loader2, Save, CheckCircle2, RotateCcw, Send, RefreshCw, StopCircle, Trash2, ZoomIn, ZoomOut, X, Sparkles } from "lucide-react";
+import { ImageEditorModal } from "@/components/image-editor-modal";
+import { Upload, Loader2, Save, CheckCircle2, RotateCcw, Send, RefreshCw, StopCircle, Trash2, ZoomIn, ZoomOut, X, Sparkles, Pencil } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
@@ -84,6 +85,7 @@ export function VivaconStockPanel() {
   // 이미지 팝업(라이트박스)
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  const [editingId, setEditingId] = useState<string | null>(null); // 이미지 편집 대상
 
   // 상품명 자동완성 + 영문명 사전 + 매입처 마스터
   const [productOptions, setProductOptions] = useState<string[]>([]);
@@ -714,11 +716,19 @@ export function VivaconStockPanel() {
             r.published ? "border-green-500/40 bg-green-50/40 dark:bg-green-950/10" :
             r.inspection_status === "approved" ? "border-primary/40 bg-primary/5" :
             isLowConf(r) ? "border-warning/50 bg-warning/5" : "border-border")}>
-            {/* 이미지 (클릭 → 라이트박스) */}
-            <button type="button" onClick={() => { setLightbox(r.image_url); setScale(1); }} className="shrink-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.image_url} alt="기프티콘" className="h-32 w-24 sm:h-40 sm:w-32 rounded-lg border border-border object-cover hover:opacity-80" />
-            </button>
+            {/* 이미지 (클릭 → 라이트박스) + 편집 */}
+            <div className="flex shrink-0 flex-col items-center gap-1">
+              <button type="button" onClick={() => { setLightbox(r.image_url); setScale(1); }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.image_url} alt="기프티콘" className="h-32 w-24 sm:h-40 sm:w-32 rounded-lg border border-border object-cover hover:opacity-80" />
+              </button>
+              {!r.published && r.image_url && (
+                <button onClick={() => setEditingId(r.id)} title="유효기간 가리기·자르기"
+                  className="flex w-full items-center justify-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary">
+                  <Pencil className="h-3 w-3" /> 이미지 편집
+                </button>
+              )}
+            </div>
             {/* 필드 (Enter=저장) */}
             <div className="min-w-0 flex-1 space-y-1.5"
               onKeyDown={(e) => { if (e.key === "Enter" && !r.published && e.target instanceof HTMLInputElement) saveRow(r); }}>
@@ -813,6 +823,15 @@ export function VivaconStockPanel() {
 
       {rows.length === 0 && !busy && (
         <p className="py-8 text-center text-sm text-muted-foreground">이미지를 업로드하면 OCR 검수 카드가 여기 표시됩니다.</p>
+      )}
+
+      {/* 이미지 편집기 (유효기간 가리기·자르기) */}
+      {editingId && (
+        <ImageEditorModal
+          registrationId={editingId}
+          onClose={() => setEditingId(null)}
+          onSaved={(url) => updateRow(editingId, { image_url: url })}
+        />
       )}
 
       {/* 라이트박스 — 빈 곳/이미지 아무데나 탭하면 닫힘. 확대는 버튼, 이동은 드래그 스크롤 */}
