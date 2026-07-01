@@ -68,15 +68,20 @@ export async function GET(req: Request) {
     }
 
     // 판매/발송 상태 (코드→gifticon_orders). 코드형: 쿠폰코드 배치 / 이미지형: 원본_파일경로 ilike
+    // 발송완료 신호(코드형/이미지형 통합):
+    //  코드형=alimtalk_sent/dispatch_completed / 이미지형=전송완료_파일경로 / 공통=status'used'·열람
+    const isSent = (row: Record<string, unknown>) =>
+      !!row.alimtalk_sent || !!row.dispatch_completed || !!row["전송완료_파일경로"] ||
+      row.status === "used" || !!row.first_accessed_at;
     const orderMap = new Map<string, { sold: boolean; sent: boolean; failed: boolean }>();
     const upd = (code: string, row: Record<string, unknown>) => {
       const cur = orderMap.get(code) ?? { sold: false, sent: false, failed: false };
       cur.sold = true;
-      if (row.alimtalk_sent || row.dispatch_completed) cur.sent = true;
+      if (isSent(row)) cur.sent = true;
       if (row.dispatch_failed) cur.failed = true;
       orderMap.set(code, cur);
     };
-    const OSEL = "쿠폰코드, alimtalk_sent, dispatch_completed, dispatch_failed, status";
+    const OSEL = "쿠폰코드, alimtalk_sent, dispatch_completed, dispatch_failed, status, first_accessed_at, 전송완료_파일경로";
     const codeCodes = regs.filter((r) => r.stored_as_code && r.coupon_code).map((r) => r.coupon_code as string);
     for (let i = 0; i < codeCodes.length; i += 200) {
       const { data } = await vc.from("gifticon_orders").select(OSEL).in("쿠폰코드", codeCodes.slice(i, i + 200));
@@ -86,7 +91,7 @@ export async function GET(req: Request) {
     const imgCodes = regs.filter((r) => !r.stored_as_code && r.coupon_code).map((r) => r.coupon_code as string);
     for (const code of imgCodes) {
       const { data } = await vc.from("gifticon_orders")
-        .select("alimtalk_sent, dispatch_completed, dispatch_failed, status")
+        .select("alimtalk_sent, dispatch_completed, dispatch_failed, status, first_accessed_at, 전송완료_파일경로")
         .or(`원본_파일경로.ilike.%${code}%,전송완료_파일경로.ilike.%${code}%`).limit(5);
       for (const row of data ?? []) upd(code, row);
     }
