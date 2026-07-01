@@ -131,6 +131,14 @@ export function VivaconStockPanel() {
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
+  // 라이트박스 열려있는 동안 배경 스크롤 잠금(모바일에서 닫은 뒤 위치 유실 방지)
+  useEffect(() => {
+    if (!lightbox) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [lightbox]);
+
   // 기존 배치 재진입
   const openBatch = (id: string) => {
     const b = batches.find((x) => x.id === id);
@@ -807,19 +815,29 @@ export function VivaconStockPanel() {
         <p className="py-8 text-center text-sm text-muted-foreground">이미지를 업로드하면 OCR 검수 카드가 여기 표시됩니다.</p>
       )}
 
-      {/* 라이트박스 (화면 내 팝업 + 확대/축소) */}
+      {/* 라이트박스 — 빈 곳/이미지 아무데나 탭하면 닫힘. 확대는 버튼, 이동은 드래그 스크롤 */}
       {lightbox && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4" onClick={() => setLightbox(null)}>
-          <div className="absolute right-4 top-4 flex gap-2" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setScale((s) => Math.max(0.5, s - 0.25))} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/90 text-slate-800"><ZoomOut className="h-5 w-5" /></button>
-            <span className="flex h-10 min-w-14 items-center justify-center rounded-lg bg-white/90 text-sm text-slate-800">{Math.round(scale * 100)}%</span>
-            <button onClick={() => setScale((s) => Math.min(5, s + 0.25))} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/90 text-slate-800"><ZoomIn className="h-5 w-5" /></button>
-            <button onClick={() => setLightbox(null)} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/90 text-slate-800"><X className="h-5 w-5" /></button>
+        <div
+          className="fixed inset-0 z-[200] overflow-auto bg-black/85"
+          onClick={() => { setLightbox(null); setScale(1); }}
+        >
+          {/* 컨트롤 (안전영역 고려, 큰 닫기 버튼) */}
+          <div
+            className="fixed right-3 z-10 flex items-center gap-2"
+            style={{ top: "max(0.75rem, env(safe-area-inset-top))" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={() => setScale((s) => Math.max(0.5, s - 0.25))} className="flex h-11 w-11 items-center justify-center rounded-lg bg-white/90 text-slate-800 shadow"><ZoomOut className="h-5 w-5" /></button>
+            <span className="flex h-11 min-w-14 items-center justify-center rounded-lg bg-white/90 text-sm text-slate-800 shadow">{Math.round(scale * 100)}%</span>
+            <button onClick={() => setScale((s) => Math.min(5, s + 0.25))} className="flex h-11 w-11 items-center justify-center rounded-lg bg-white/90 text-slate-800 shadow"><ZoomIn className="h-5 w-5" /></button>
+            <button onClick={() => { setLightbox(null); setScale(1); }} className="flex h-11 items-center gap-1 rounded-lg bg-white px-3 font-medium text-slate-800 shadow"><X className="h-5 w-5" /> 닫기</button>
           </div>
-          <div className="max-h-full max-w-full overflow-auto" onClick={(e) => e.stopPropagation()}>
+          {/* 이미지: 탭하면 닫힘(상위로 버블). min-h-full+center로 확대 시에도 상단 안 잘림 */}
+          <div className="flex min-h-full items-center justify-center p-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={lightbox} alt="확대" style={{ transform: `scale(${scale})`, transformOrigin: "center" }} className="max-w-none rounded-lg transition-transform" />
+            <img src={lightbox} alt="확대" style={{ transform: `scale(${scale})`, transformOrigin: "center" }} className="max-w-full rounded-lg" />
           </div>
+          <p className="pointer-events-none fixed inset-x-0 bottom-4 mx-auto w-fit rounded-full bg-black/60 px-3 py-1 text-xs text-white">빈 곳을 탭하면 닫힙니다</p>
         </div>
       )}
     </div>
