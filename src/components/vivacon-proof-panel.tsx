@@ -244,12 +244,13 @@ export function VivaconProofPanel() {
     ? inventory.filter((r) => regDate(r) === dateFilter)
     : inventory;
   const total = displayedInventory.length;
-  // 좌측 증빙도 우측 재고와 동일한 연결상태 필터 적용 (미연결만이면 이미 연결된 증빙 숨김)
-  const displayedProofs = proofs.filter((p) =>
-    mappedFilter === "false" ? p.linked_count === 0
-    : mappedFilter === "true" ? p.linked_count > 0
-    : true,
-  );
+  // 좌측 증빙도 우측 재고와 동일 기준(날짜=거래일 proof_date, 연결상태) 필터 적용
+  const displayedProofs = proofs.filter((p) => {
+    if (dateFilter && (p.proof_date ?? "") !== dateFilter) return false; // 거래일 필터
+    if (mappedFilter === "false") return p.linked_count === 0;           // 미연결만
+    if (mappedFilter === "true") return p.linked_count > 0;              // 연결완료만
+    return true;
+  });
   // 셀콘(A경로)은 시스템 자체 증빙 → 증빙 확보로 간주
   const isSystemProof = (r: Reg) => r.source === "sellcon";
   const mapped = displayedInventory.filter((r) => r.proof_id).length;
@@ -413,7 +414,7 @@ export function VivaconProofPanel() {
           })}
           {displayedProofs.length === 0 && (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              {proofs.length === 0 ? "업로드된 증빙이 없습니다." : mappedFilter === "false" ? "미연결 증빙이 없습니다." : mappedFilter === "true" ? "연결완료된 증빙이 없습니다." : "증빙이 없습니다."}
+              {proofs.length === 0 ? "업로드된 증빙이 없습니다." : dateFilter ? `${dateFilter} 거래일 증빙이 없습니다.` : mappedFilter === "false" ? "미연결 증빙이 없습니다." : mappedFilter === "true" ? "연결완료된 증빙이 없습니다." : "증빙이 없습니다."}
             </p>
           )}
         </div>
