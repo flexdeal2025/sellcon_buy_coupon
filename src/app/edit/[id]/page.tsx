@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useRecords } from "@/hooks/use-records";
 import { usePhoneLines } from "@/hooks/use-phone-lines";
 import { usePresets } from "@/hooks/use-presets";
+import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { useWorker } from "@/hooks/use-worker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,8 @@ export default function EditPurchasePage() {
 
   const { records, update } = useRecords();
   const { lines } = usePhoneLines();
-  const { suppliers, products } = usePresets();
+  const { suppliers } = usePresets();
+  const smartstoreProducts = useVivaconProducts();
   const { worker } = useWorker();
 
   // 원본 레코드
@@ -77,12 +79,12 @@ export default function EditPurchasePage() {
   const qtyNum = Number(orderedQty) || 0;
   const limitNum = Number(limitPer) || 0;
 
-  // 상품명 자동완성
+  // 상품명 자동완성: 스마트스토어 수집 상품목록 (프리셋 폐지)
   const productSuggestions = useMemo(() => {
     const q = productName.toLowerCase().trim();
-    if (!q) return products.slice(0, 12);
-    return products.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
-  }, [products, productName]);
+    if (!q) return smartstoreProducts.slice(0, 12);
+    return smartstoreProducts.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
+  }, [smartstoreProducts, productName]);
 
   // 양방향 계산기
   function recompute(q: number, u: number, t: number, source: CalcSource) {
