@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { Upload, Loader2, RefreshCw, Trash2, ExternalLink, FileText } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, ExternalLink, FileText, FileArchive } from "lucide-react";
 
 const AUTH = { "x-app-passcode": process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234" };
 
@@ -17,18 +17,12 @@ const fileIcon = (ct: string) => (ct.includes("pdf") ? "📄" : ct.startsWith("i
 
 export function SupplierDocsPanel() {
   const [vendors, setVendors] = useState<string[]>([]);
-  // 업로드 폼
-  const [supplier, setSupplier] = useState("");
-  const [docDate, setDocDate] = useState("");
-  const [amount, setAmount] = useState("");
-  const [memo, setMemo] = useState("");
-  const [uploading, setUploading] = useState(false);
-  // 필터/목록
   const [fSupplier, setFSupplier] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [rows, setRows] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(false);
+  const [zipping, setZipping] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -52,28 +46,6 @@ export function SupplierDocsPanel() {
   }, [fSupplier, from, to]);
   useEffect(() => { load(); }, [load]);
 
-  async function handleUpload(file: File | null | undefined) {
-    if (!file) return;
-    if (!supplier.trim()) { toast.error("공급처를 입력하세요"); return; }
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("supplier", supplier.trim());
-      if (docDate) fd.append("doc_date", docDate);
-      if (amount) fd.append("amount", amount);
-      if (memo) fd.append("memo", memo.trim());
-      const res = await fetch("/api/supplier-docs/upload", { method: "POST", headers: AUTH, body: fd });
-      const json = await res.json();
-      if (!json.ok) { toast.error("업로드 실패: " + json.error); return; }
-      toast.success("증빙 보관 완료");
-      setMemo(""); setAmount("");
-      await load();
-    } catch (e) {
-      toast.error("업로드 오류: " + (e instanceof Error ? e.message : ""));
-    } finally { setUploading(false); }
-  }
-
   async function remove(id: string) {
     if (!confirm("이 증빙을 삭제합니다(파일 포함). 계속할까요?")) return;
     const res = await fetch(`/api/supplier-docs?id=${id}`, { method: "DELETE", headers: AUTH });
@@ -82,34 +54,41 @@ export function SupplierDocsPanel() {
     await load();
   }
 
+  async function downloadZip() {
+    if (!fSupplier) { toast.error("일괄 다운로드는 공급처를 먼저 선택하세요"); return; }
+    setZipping(true);
+    try {
+      const p = new URLSearchParams({ supplier: fSupplier });
+      if (from) p.set("from", from);
+      if (to) p.set("to", to);
+      const res = await fetch(`/api/supplier-docs/download-zip?${p}`, { headers: AUTH });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error("다운로드 실패: " + (j.error || res.status));
+        return;
+      }
+      const blob = await res.blob();
+      const t = new Date();
+      const ymd = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, "0")}${String(t.getDate()).padStart(2, "0")}`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${fSupplier}_${ymd}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      toast.success("ZIP 다운로드 시작");
+    } finally { setZipping(false); }
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        대량 매입 공급처(센드비·오피스콘 등)의 거래내역서·세금계산서 등을 미리 올려 두고 나중에 조회합니다. (이미지·PDF·엑셀 · GCS 안전 보관)
+        대량 매입 공급처(센드비·오피스콘 등) 증빙을 공급처별로 모아 조회합니다. 업로드는 <strong>매입 건 상세</strong>에서, 여기선 조회·일괄다운로드만.
       </p>
 
-      {/* 업로드 */}
-      <div className="flex flex-wrap items-end gap-2 rounded-xl border border-border bg-secondary/40 p-3">
-        <label className="text-sm"><span className="mb-1 block text-xs text-muted-foreground">공급처</span>
-          <input list="supdoc-vendors" value={supplier} onChange={(e) => setSupplier(e.target.value)}
-            placeholder="예: 센드비" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" />
-          <datalist id="supdoc-vendors">{vendors.map((v) => <option key={v} value={v} />)}</datalist>
-        </label>
-        <label className="text-sm"><span className="mb-1 block text-xs text-muted-foreground">매입일</span>
-          <input type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm" /></label>
-        <label className="text-sm"><span className="mb-1 block text-xs text-muted-foreground">금액(선택)</span>
-          <input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className="w-28 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums" /></label>
-        <label className="flex-1 text-sm"><span className="mb-1 block text-xs text-muted-foreground">메모(선택)</span>
-          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 1월 세금계산서" className="w-full min-w-[160px] rounded-lg border border-border bg-background px-2 py-1.5 text-sm" /></label>
-        <label className={cn("flex cursor-pointer items-center gap-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground", uploading && "pointer-events-none opacity-50")}>
-          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} 업로드
-          <input type="file" accept="image/*,.pdf,.xlsx,.xls" className="hidden" disabled={uploading}
-            onChange={(e) => { handleUpload(e.target.files?.[0]); e.currentTarget.value = ""; }} />
-        </label>
-      </div>
-
-      {/* 필터 */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-secondary/30 p-3 text-sm">
+      {/* 필터 + 일괄 다운로드 */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-secondary/40 p-3 text-sm">
         <select value={fSupplier} onChange={(e) => setFSupplier(e.target.value)} className="rounded-lg border border-border bg-background px-2 py-1.5">
           <option value="">전체 공급처</option>
           {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
@@ -118,7 +97,12 @@ export function SupplierDocsPanel() {
         <span className="text-muted-foreground">~</span>
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="끝" className="rounded-lg border border-border bg-background px-2 py-1.5" />
         <span className="text-muted-foreground">보관 {rows.length}건</span>
-        <button onClick={load} disabled={loading} className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 hover:bg-secondary">
+        <button onClick={downloadZip} disabled={zipping || !fSupplier || rows.length === 0}
+          title={!fSupplier ? "공급처를 선택하면 일괄 다운로드됩니다" : "선택 공급처 증빙 전체를 ZIP으로"}
+          className="ml-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-primary hover:bg-primary/20 disabled:opacity-40">
+          {zipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileArchive className="h-3.5 w-3.5" />} 공급처 일괄 ZIP
+        </button>
+        <button onClick={load} disabled={loading} className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 hover:bg-secondary">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} 조회
         </button>
       </div>
@@ -155,7 +139,7 @@ export function SupplierDocsPanel() {
               </tr>
             ))}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">보관된 증빙이 없습니다.</td></tr>
+              <tr><td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">보관된 증빙이 없습니다. (매입 건 상세에서 증빙을 업로드하세요)</td></tr>
             )}
           </tbody>
         </table>

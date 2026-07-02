@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { usePhoneLines } from "@/hooks/use-phone-lines";
@@ -30,7 +30,16 @@ import {
   Circle,
   Copy,
   Trash2,
+  Upload,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
+
+const AUTH = { "x-app-passcode": process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234" };
+
+interface SupDoc {
+  id: string; file_name: string; content_type: string; url: string; doc_date: string | null; memo: string;
+}
 
 interface Props {
   record: PurchaseRecord;
@@ -59,6 +68,41 @@ export function InventoryDetail({ record, onUpdate, onDelete, onClose }: Props) 
   const [addNote, setAddNote] = useState("");
   const [addDate, setAddDate] = useState(toDateInput());
   const [busy, setBusy] = useState(false);
+
+  // 이 매입 건의 증빙 (공급처 증빙 보관함과 공유 — purchase_record_id로 연결)
+  const [docs, setDocs] = useState<SupDoc[]>([]);
+  const [docBusy, setDocBusy] = useState(false);
+  const fetchDocs = useCallback(async () => {
+    const res = await fetch(`/api/supplier-docs?purchase_record_id=${record.id}`, { headers: AUTH, cache: "no-store" });
+    const json = await res.json();
+    if (json.ok) setDocs(json.rows as SupDoc[]);
+  }, [record.id]);
+  useEffect(() => { fetchDocs(); }, [fetchDocs]);
+
+  async function uploadDoc(file: File | null | undefined) {
+    if (!file) return;
+    setDocBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("supplier", record.supplier ?? "");
+      if (record.purchase_date) fd.append("doc_date", String(record.purchase_date));
+      if (record.total_price) fd.append("amount", String(record.total_price));
+      fd.append("purchase_record_id", record.id);
+      const res = await fetch("/api/supplier-docs/upload", { method: "POST", headers: AUTH, body: fd });
+      const json = await res.json();
+      if (!json.ok) { toast.error("증빙 업로드 실패: " + json.error); return; }
+      toast.success("증빙 업로드됨");
+      await fetchDocs();
+    } finally { setDocBusy(false); }
+  }
+  async function removeDoc(id: string) {
+    if (!confirm("이 증빙을 삭제할까요?")) return;
+    const res = await fetch(`/api/supplier-docs?id=${id}`, { method: "DELETE", headers: AUTH });
+    const json = await res.json();
+    if (!json.ok) { toast.error("삭제 실패: " + json.error); return; }
+    await fetchDocs();
+  }
 
   // 부분 입고 추가
   async function addDelivery() {
@@ -440,6 +484,43 @@ export function InventoryDetail({ record, onUpdate, onDelete, onClose }: Props) 
                 </li>
               ))}
             </ol>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 증빙 (공급처 거래내역서·세금계산서 등 — 보관함과 공유) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4" />
+            증빙 ({docs.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <label className={cn("flex w-fit cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground", docBusy && "pointer-events-none opacity-50")}>
+            {docBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} 증빙 업로드
+            <input type="file" accept="image/*,.pdf,.xlsx,.xls" className="hidden" disabled={docBusy}
+              onChange={(e) => { uploadDoc(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+          </label>
+          <p className="text-xs text-muted-foreground">이미지·PDF·엑셀 · 공급처({record.supplier || "미지정"})·매입일 자동 태깅 · 보관함에서 공급처별 조회/일괄다운로드</p>
+          {docs.length === 0 ? (
+            <p className="py-1 text-sm text-muted-foreground">아직 등록된 증빙이 없습니다.</p>
+          ) : (
+            <ul className="space-y-1">
+              {docs.map((d) => (
+                <li key={d.id} className="flex items-center gap-2 text-sm">
+                  <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline">
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{d.file_name}</span>
+                    <ExternalLink className="h-3 w-3 shrink-0" />
+                  </a>
+                  {d.memo && <span className="truncate text-xs text-muted-foreground">· {d.memo}</span>}
+                  <button onClick={() => removeDoc(d.id)} title="삭제" className="ml-auto shrink-0 text-muted-foreground hover:text-destructive">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>

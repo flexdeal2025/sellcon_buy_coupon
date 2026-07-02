@@ -14,9 +14,11 @@ export async function GET(req: Request) {
     const supplier = url.searchParams.get("supplier") || "";
     const from = url.searchParams.get("from") || "";
     const to = url.searchParams.get("to") || "";
+    const recordId = url.searchParams.get("purchase_record_id") || "";
 
     const sb = getServerSupabase();
     let q = sb.from("supplier_documents").select("*").order("doc_date", { ascending: false }).order("created_at", { ascending: false }).limit(1000);
+    if (recordId) q = q.eq("purchase_record_id", recordId);
     if (supplier) q = q.eq("supplier", supplier);
     if (from) q = q.gte("doc_date", from);
     if (to) q = q.lte("doc_date", to);

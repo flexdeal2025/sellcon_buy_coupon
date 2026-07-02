@@ -21,6 +21,7 @@ export async function POST(req: Request) {
   const docDate = String(form.get("doc_date") ?? "").trim();
   const amountRaw = String(form.get("amount") ?? "").replace(/[^0-9-]/g, "");
   const memo = String(form.get("memo") ?? "").trim();
+  const purchaseRecordId = String(form.get("purchase_record_id") ?? "").trim() || null;
   if (!(file instanceof Blob)) return NextResponse.json({ ok: false, error: "파일 필요" }, { status: 400 });
   if (!supplier) return NextResponse.json({ ok: false, error: "공급처 필요" }, { status: 400 });
 
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
       file_path: filePath,
       file_name: fname,
       content_type: contentType,
+      purchase_record_id: purchaseRecordId,
     }).select("id").single();
     if (error) throw new Error(error.message);
 
