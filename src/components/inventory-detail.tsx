@@ -83,17 +83,32 @@ export function InventoryDetail({ record, onUpdate, onDelete, onClose }: Props) 
     if (!file) return;
     setDocBusy(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("supplier", record.supplier ?? "");
-      if (record.purchase_date) fd.append("doc_date", String(record.purchase_date));
-      if (record.total_price) fd.append("amount", String(record.total_price));
-      fd.append("purchase_record_id", record.id);
-      const res = await fetch("/api/supplier-docs/upload", { method: "POST", headers: AUTH, body: fd });
-      const json = await res.json();
-      if (!json.ok) { toast.error("증빙 업로드 실패: " + json.error); return; }
+      const ct = file.type || "application/octet-stream";
+      // 1) 서명 URL — 브라우저→GCS 직접 업로드로 서버리스 4.5MB 본문한도 우회(대용량 PDF 대응)
+      const signRes = await fetch("/api/supplier-docs/sign-upload", {
+        method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+        body: JSON.stringify({ supplier: record.supplier ?? "", file_name: file.name, content_type: ct }),
+      });
+      const sign = await signRes.json();
+      if (!sign.ok) { toast.error("업로드 준비 실패: " + sign.error); return; }
+      // 2) GCS 직접 PUT (본문한도 없음)
+      const put = await fetch(sign.uploadUrl, { method: "PUT", headers: { "Content-Type": ct }, body: file });
+      if (!put.ok) { toast.error(`업로드 실패(GCS ${put.status}) — 버킷 CORS 미설정일 수 있음`); return; }
+      // 3) 메타 저장
+      const fin = await fetch("/api/supplier-docs/finalize", {
+        method: "POST", headers: { "Content-Type": "application/json", ...AUTH },
+        body: JSON.stringify({
+          supplier: record.supplier ?? "", doc_date: record.purchase_date ?? null,
+          amount: record.total_price ?? null, purchase_record_id: record.id,
+          file_path: sign.filePath, file_name: file.name, content_type: ct,
+        }),
+      });
+      const finj = await fin.json();
+      if (!finj.ok) { toast.error("증빙 저장 실패: " + finj.error); return; }
       toast.success("증빙 업로드됨");
       await fetchDocs();
+    } catch (e) {
+      toast.error("업로드 오류: " + (e instanceof Error ? e.message : ""));
     } finally { setDocBusy(false); }
   }
   async function removeDoc(id: string) {

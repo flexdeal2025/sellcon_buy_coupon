@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRecords } from "@/hooks/use-records";
+import { getSupabaseClient } from "@/lib/supabase/client";
 import { PurchaseCard } from "@/components/purchase-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,16 @@ export default function DashboardPage() {
   const { records, loading } = useRecords();
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("미완료");
+
+  // 증빙 업로드된 매입 건 id 집합 (현황 카드에 '증빙완료' 태그 표시용)
+  const [proofSet, setProofSet] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    (async () => {
+      const { data } = await getSupabaseClient()
+        .from("supplier_documents").select("purchase_record_id").not("purchase_record_id", "is", null);
+      setProofSet(new Set((data ?? []).map((d: { purchase_record_id: string }) => d.purchase_record_id)));
+    })();
+  }, [records]);
 
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -140,6 +151,7 @@ export default function DashboardPage() {
             <PurchaseCard
               key={r.id}
               record={r}
+              hasProof={proofSet.has(r.id)}
               onClick={() => router.push(`/inventory?id=${r.id}`)}
             />
           ))}
