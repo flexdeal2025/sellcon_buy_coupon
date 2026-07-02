@@ -35,6 +35,22 @@ export async function getSignedReadUrl(bucket: string, path: string, minutes = 1
   return url;
 }
 
+/** 브라우저 직접 업로드용 v4 서명 PUT URL (서버리스 4.5MB 본문한도 우회 — 대용량 PDF 등) */
+export async function getSignedUploadUrl(bucket: string, path: string, contentType: string, minutes = 15): Promise<string> {
+  const [url] = await client()
+    .bucket(bucket)
+    .file(path)
+    .getSignedUrl({ version: "v4", action: "write", expires: Date.now() + minutes * 60_000, contentType });
+  return url;
+}
+
+/** 버킷 CORS 설정 (브라우저 직접 업로드 PUT 허용) — 1회성 관리 작업 */
+export async function setBucketCors(bucket: string, origins: string[]): Promise<void> {
+  await client().bucket(bucket).setCorsConfiguration([
+    { origin: origins, method: ["PUT", "GET", "HEAD", "OPTIONS"], responseHeader: ["Content-Type", "x-goog-resumable"], maxAgeSeconds: 3600 },
+  ]);
+}
+
 /** 매입 증빙 이미지 업로드 (OCR 버킷의 proof/ 경로) */
 export async function uploadProofImage(destPath: string, buffer: Buffer, contentType: string): Promise<string> {
   await client().bucket(OCR_BUCKET).file(destPath).save(buffer, { resumable: false, contentType });

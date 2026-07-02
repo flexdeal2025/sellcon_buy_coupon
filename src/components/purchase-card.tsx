@@ -11,9 +11,11 @@ import type { PurchaseRecord } from "@/lib/types";
 export function PurchaseCard({
   record,
   onClick,
+  hasProof = false,
 }: {
   record: PurchaseRecord;
   onClick?: () => void;
+  hasProof?: boolean;
 }) {
   const progress =
     record.ordered_quantity > 0
@@ -32,7 +34,14 @@ export function PurchaseCard({
           </div>
           <p className="truncate text-sm text-muted-foreground">{record.product_name}</p>
         </div>
-        <StatusBadge status={record.status} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {hasProof && (
+            <span className="rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-950/40 dark:text-green-400" title="증빙 업로드 완료">
+              📎 증빙완료
+            </span>
+          )}
+          <StatusBadge status={record.status} />
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
