@@ -15,6 +15,7 @@ import {
   ScanLine,
   ReceiptText,
   History,
+  Archive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SupabaseBanner } from "@/components/supabase-banner";
@@ -36,12 +37,13 @@ const NAV: NavGroup[] = [
     label: "매입",
     icon: ClipboardList,
     href: "/",
-    match: ["/", "/new", "/inventory", "/stock"],
+    match: ["/", "/new", "/inventory", "/stock", "/supplier-docs"],
     children: [
       { href: "/", label: "현황", icon: LayoutDashboard },
       { href: "/new", label: "매입입력", icon: PlusCircle },
       { href: "/inventory", label: "재고확인", icon: PackageCheck },
       { href: "/stock", label: "재고등록", icon: ScanLine },
+      { href: "/supplier-docs", label: "증빙보관함", icon: Archive },
     ],
   },
   {
@@ -83,7 +85,7 @@ const NAV: NavGroup[] = [
 ];
 
 // 화면 전체 폭을 쓰는 PC 작업용 라우트 (헤더+콘텐츠 함께 넓어짐)
-const WIDE_ROUTES = ["/vivacon", "/stock", "/proof", "/trace"];
+const WIDE_ROUTES = ["/vivacon", "/stock", "/proof", "/trace", "/supplier-docs"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
