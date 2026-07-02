@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { cn, toKST } from "@/lib/utils";
 import { toast } from "sonner";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2, Trash2, Search } from "lucide-react";
+import { Upload, Loader2, Link2, Unlink, RefreshCw, CheckCircle2, Trash2, Search, X } from "lucide-react";
 
 const PASSCODE = process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234";
 const AUTH = { "x-app-passcode": PASSCODE };
@@ -40,6 +40,7 @@ export function VivaconProofPanel() {
   const [busy, setBusy] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null); // 증빙 이미지 팝업
 
   // 업로드 폼
   const [platform, setPlatform] = useState("당근마켓");
@@ -93,6 +94,13 @@ export function VivaconProofPanel() {
   useEffect(() => { fetchProofs(); }, [fetchProofs]);
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
   useEffect(() => { setSelectedRegs(new Set()); setSelectedProofs(new Set()); }, [supplier, mappedFilter, dateFilter]);
+  // 팝업 열림 동안 배경 스크롤 잠금
+  useEffect(() => {
+    if (!lightbox) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [lightbox]);
 
   const uploadProofs = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -391,8 +399,12 @@ export function VivaconProofPanel() {
                   onChange={(e) => { e.stopPropagation(); setSelectedProofs((s) => { const n = new Set(s); e.target.checked ? n.add(p.id) : n.delete(p.id); return n; }); }}
                   className="mt-1 h-4 w-4 shrink-0" />
               )}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.image_url} alt="증빙" className="h-24 w-20 rounded border border-border object-cover" />
+              {/* 클릭 시 팝업(활성화와 분리) */}
+              <button type="button" title="클릭해서 크게 보기" className="shrink-0"
+                onClick={(e) => { e.stopPropagation(); setLightbox(p.image_url); }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.image_url} alt="증빙" className="h-24 w-20 rounded border border-border object-cover hover:opacity-80" />
+              </button>
               <div className="min-w-0 flex-1 text-xs">
                 <div className="flex items-center gap-1">
                   <span className="font-medium">{p.platform} {p.trader_name && `· ${p.trader_name}`}</span>
@@ -518,6 +530,19 @@ export function VivaconProofPanel() {
           </div>
         </div>
       </div>
+
+      {/* 증빙 이미지 팝업 — 아무 곳이나 탭하면 닫힘 */}
+      {lightbox && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center overflow-auto bg-black/85 p-4" onClick={() => setLightbox(null)}>
+          <button onClick={() => setLightbox(null)}
+            className="fixed right-3 z-10 flex h-11 items-center gap-1 rounded-lg bg-white px-3 font-medium text-slate-800 shadow"
+            style={{ top: "max(0.75rem, env(safe-area-inset-top))" }}>
+            <X className="h-5 w-5" /> 닫기
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="증빙 확대" className="max-h-full max-w-full rounded-lg" />
+        </div>
+      )}
     </div>
   );
 }
