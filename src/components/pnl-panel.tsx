@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatKRW, cn, toDateInput } from "@/lib/utils";
 import { BYEOLDO_CHANNEL_PRODUCT_NO } from "@/lib/constants";
+import { CostPreviewPanel } from "@/components/cost-preview-panel";
 import {
   Loader2,
   TrendingUp,
@@ -141,7 +142,7 @@ function findCost(list: Cost[] | undefined, date: string): Cost | null {
 
 // ─────────────────────────── PnLPanel ───────────────────────────
 export function PnLPanel() {
-  const [view, setView] = useState<"dashboard" | "cost">("dashboard");
+  const [view, setView] = useState<"dashboard" | "cost" | "preview">("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
   const [costs, setCosts] = useState<Cost[]>([]);
   const [orderCosts, setOrderCosts] = useState<OrderCost[]>([]);
@@ -191,16 +192,19 @@ export function PnLPanel() {
       <div className="flex rounded-xl bg-secondary p-1">
         <SubTab active={view === "dashboard"} onClick={() => setView("dashboard")} icon={TrendingUp} label="손익 대시보드" />
         <SubTab active={view === "cost"} onClick={() => setView("cost")} icon={Tag} label="매입원가 관리" />
+        <SubTab active={view === "preview"} onClick={() => setView("preview")} icon={Calculator} label="실원가 검증" />
       </div>
       {view === "dashboard" ? (
         <Dashboard onGoCost={() => setView("cost")} />
-      ) : (
+      ) : view === "cost" ? (
         <CostManager
           products={products}
           costsByProduct={costsByProduct}
           orderCostMap={orderCostMap}
           onChanged={loadMeta}
         />
+      ) : (
+        <CostPreviewPanel />
       )}
     </div>
   );
