@@ -29,17 +29,37 @@ type NavGroup = {
   children?: NavChild[]; // 별도 경로로 분리된 하위 기능 (서브내비로 표시)
 };
 
+// B안 재구성: 8개 → 5개 그룹 (사입→재고→증빙/추적→정산→설정 흐름을 메뉴에 반영)
 const NAV: NavGroup[] = [
   {
     key: "purchase",
-    label: "매입관리",
+    label: "매입",
     icon: ClipboardList,
     href: "/",
-    match: ["/", "/new", "/inventory"],
+    match: ["/", "/new", "/inventory", "/stock"],
     children: [
       { href: "/", label: "현황", icon: LayoutDashboard },
       { href: "/new", label: "매입입력", icon: PlusCircle },
       { href: "/inventory", label: "재고확인", icon: PackageCheck },
+      { href: "/stock", label: "재고등록", icon: ScanLine },
+    ],
+  },
+  {
+    key: "vivacon",
+    label: "쿠폰재고",
+    icon: Boxes,
+    href: "/vivacon",
+    match: ["/vivacon"],
+  },
+  {
+    key: "proof",
+    label: "증빙·이력",
+    icon: ReceiptText,
+    href: "/proof",
+    match: ["/proof", "/trace"],
+    children: [
+      { href: "/proof", label: "증빙매핑", icon: ReceiptText },
+      { href: "/trace", label: "이력조회", icon: History },
     ],
   },
   {
@@ -50,51 +70,20 @@ const NAV: NavGroup[] = [
     match: ["/manage"],
   },
   {
-    key: "vivacon",
-    label: "쿠폰재고",
-    icon: Boxes,
-    href: "/vivacon",
-    match: ["/vivacon"],
-  },
-  {
-    key: "stock",
-    label: "재고등록",
-    icon: ScanLine,
-    href: "/stock",
-    match: ["/stock"],
-  },
-  {
-    key: "proof",
-    label: "증빙매핑",
-    icon: ReceiptText,
-    href: "/proof",
-    match: ["/proof"],
-  },
-  {
-    key: "trace",
-    label: "이력조회",
-    icon: History,
-    href: "/trace",
-    match: ["/trace"],
-  },
-  {
     key: "settings",
     label: "설정",
     icon: Settings2,
     href: "/settings",
-    match: ["/settings"],
-  },
-  {
-    key: "vision",
-    label: "사업방향",
-    icon: Compass,
-    href: "/admin/architecture",
-    match: ["/admin"],
+    match: ["/settings", "/admin"],
+    children: [
+      { href: "/settings", label: "설정", icon: Settings2 },
+      { href: "/admin/architecture", label: "사업방향", icon: Compass },
+    ],
   },
 ];
 
 // 화면 전체 폭을 쓰는 PC 작업용 라우트 (헤더+콘텐츠 함께 넓어짐)
-const WIDE_ROUTES = ["/vivacon", "/stock", "/proof"];
+const WIDE_ROUTES = ["/vivacon", "/stock", "/proof", "/trace"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
