@@ -109,6 +109,7 @@ export function CostPreviewPanel() {
               <th className="px-2 py-2 text-right">실원가</th>
               <th className="px-2 py-2 text-right">차이</th>
               <th className="px-2 py-2 text-center">상태</th>
+              <th className="px-2 py-2 text-right">마진율</th>
             </tr>
           </thead>
           <tbody>
@@ -130,10 +131,18 @@ export function CostPreviewPanel() {
                     : r.traceable ? <span className="text-amber-600" title={`발송쿠폰 ${r.auto_coupons}개 중 원가확보 ${r.auto_known}개`}>원가일부</span>
                     : <span className="text-muted-foreground">미추적</span>}
                 </td>
+                <td className="px-2 py-1.5 text-right tabular-nums font-medium">
+                  {r.cost_known && r.settle_amount > 0
+                    ? (() => {
+                        const m = ((r.settle_amount - (r.auto_cost ?? 0)) / r.settle_amount) * 100;
+                        return <span className={m >= 0 ? "text-green-600" : "text-red-600"}>{m.toFixed(1)}%</span>;
+                      })()
+                    : <span className="text-muted-foreground">-</span>}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={7} className="py-8 text-center text-sm text-muted-foreground">해당 조건 데이터가 없습니다.</td></tr>
+              <tr><td colSpan={8} className="py-8 text-center text-sm text-muted-foreground">해당 조건 데이터가 없습니다.</td></tr>
             )}
           </tbody>
         </table>
