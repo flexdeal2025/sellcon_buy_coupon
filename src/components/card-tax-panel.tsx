@@ -5,7 +5,9 @@ import { getSupabaseClient } from "@/lib/supabase/client";
 import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2, PencilLine } from "lucide-react";
+import { Download, RefreshCw, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Wand2, Trash2, PencilLine, Upload, Loader2 } from "lucide-react";
+
+const AUTH = { "x-app-passcode": process.env.NEXT_PUBLIC_APP_PASSCODE ?? "1234" };
 
 interface CardTransaction {
   id: string;
@@ -63,6 +65,10 @@ export function CardTaxPanel() {
   const [page, setPage]           = useState(0);
   const [pageSize, setPageSize]   = useState(50);
   const [loading, setLoading]     = useState(false);
+
+  /* ── 카드내역 업로드 ───────────────────── */
+  const [uploading, setUploading]   = useState(false);
+  const [uploadOwner, setUploadOwner] = useState("");
 
   /* ── 통계 ──────────────────────────────── */
   const [stats, setStats] = useState({ total: 0, done: 0, todo: 0 });
@@ -183,6 +189,30 @@ export function CardTaxPanel() {
       setLoading(false);
     }
   }, [sb, page, pageSize, applyFilters, sortKey, sortAsc]);
+
+  /* ── 카드내역 엑셀 업로드 → 자동 파싱 반영 ── */
+  async function handleUpload(file: File | null | undefined) {
+    if (!file) return;
+    if (!uploadOwner) { toast.error("명의자를 먼저 선택하세요"); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("owner", uploadOwner);
+      const res = await fetch("/api/card-tax/upload", { method: "POST", headers: AUTH, body: fd });
+      const json = await res.json();
+      if (!json.ok) { toast.error("업로드 실패: " + json.error); return; }
+      const byco = Object.entries(json.byCompany ?? {}).map(([k, v]) => `${k} ${v}`).join(", ");
+      toast.success(`${json.inserted}건 반영 (${byco})${json.rawStored ? " · 원본 보관됨" : ""}`);
+      await Promise.all([fetchRows(), fetchStats(), fetchCompanies()]);
+    } catch (e) {
+      toast.error("업로드 오류: " + (e instanceof Error ? e.message : ""));
+    } finally {
+      setUploading(false);
+    }
+  }
+  // 명의자 기본값(첫 명의자) 자동 선택
+  useEffect(() => { if (!uploadOwner && ownerList.length) setUploadOwner(ownerList[0]); }, [ownerList, uploadOwner]);
 
   /* ── 규칙 fetch ────────────────────────── */
   const fetchRules = useCallback(async () => {
@@ -525,6 +555,17 @@ export function CardTaxPanel() {
             <Wand2 className={cn("h-3.5 w-3.5", applying && "animate-pulse")} />
             자동규칙 적용
           </button>
+          <select value={uploadOwner} onChange={(e) => setUploadOwner(e.target.value)}
+            title="업로드할 카드내역의 명의자" className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm">
+            <option value="">명의자 선택</option>
+            {ownerList.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+          <label className={cn("flex cursor-pointer items-center gap-1 rounded-lg border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm text-primary hover:bg-primary/10", uploading && "pointer-events-none opacity-50")}>
+            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            카드내역 업로드
+            <input type="file" accept=".xlsx,.xls" className="hidden" disabled={uploading}
+              onChange={(e) => { handleUpload(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+          </label>
           <button
             onClick={handleExport}
             className="flex items-center gap-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary"

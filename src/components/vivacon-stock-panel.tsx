@@ -168,14 +168,18 @@ export function VivaconStockPanel() {
         b = { id: json.batch.id, batch_no: json.batch.batch_no };
         setBatch(b);
       }
+      const B = b; // non-null 캡처(병렬 클로저용)
       setProgress({ done: 0, total: arr.length });
       let done = 0;
-      for (let i = 0; i < arr.length; i++) {
-        if (stopRef.current) break;
+      // 이미지 1장씩 순차 → 동시 CONCURRENCY장 병렬 처리(체감 속도 개선).
+      // Gemini 429는 서버(gemini.ts)에서 백오프 재시도하므로 안전.
+      const CONCURRENCY = 4;
+      const uploadOne = async (file: File) => {
+        if (stopRef.current) return;
         const fd = new FormData();
-        fd.append("file", arr[i]);
-        fd.append("batch_id", b.id);
-        fd.append("batch_no", b.batch_no);
+        fd.append("file", file);
+        fd.append("batch_id", B.id);
+        fd.append("batch_no", B.batch_no);
         fd.append("storage_type", storageType);
         fd.append("default_product_name", defProduct);
         fd.append("default_supplier", defSupplier);
@@ -188,13 +192,17 @@ export function VivaconStockPanel() {
           if (json.ok && json.row?.id) {
             await fetch(`/api/stock/registration?id=${json.row.id}`, { method: "DELETE", headers: AUTH });
           }
-          break;
+          return;
         }
-        if (!json.ok) toast.error(`${arr[i].name}: ${json.error}`);
+        if (!json.ok) toast.error(`${file.name}: ${json.error}`);
         done++;
-        setProgress({ done: done, total: arr.length });
+        setProgress({ done, total: arr.length });
+      };
+      for (let i = 0; i < arr.length; i += CONCURRENCY) {
+        if (stopRef.current) break;
+        await Promise.all(arr.slice(i, i + CONCURRENCY).map(uploadOne));
       }
-      await fetchRows(b.id);
+      await fetchRows(B.id);
       loadBatches();
       toast[stopRef.current ? "info" : "success"](stopRef.current ? `중지됨 — ${done}장 처리` : `${done}장 업로드·OCR 완료`);
     } finally {
