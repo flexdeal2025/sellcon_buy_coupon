@@ -41,7 +41,7 @@ export default function NewPurchasePage() {
   const router = useRouter();
   const { records, insert } = useRecords();
   const { lines } = usePhoneLines();
-  const { suppliers, products } = usePresets();
+  const { suppliers } = usePresets();
   const smartstoreProducts = useVivaconProducts();
   const { worker } = useWorker();
 
@@ -64,16 +64,12 @@ export default function NewPurchasePage() {
   const limitNum = Number(limitPer) || 0;
   const needCount = requiredLineCount(qtyNum, limitNum);
 
-  // 상품명 자동완성 후보: 스마트스토어 상품명 + 프리셋 병합(중복 제거), 입력값으로 필터링
-  const productPool = useMemo(
-    () => Array.from(new Set([...smartstoreProducts, ...products])),
-    [smartstoreProducts, products],
-  );
+  // 상품명 자동완성 후보: 스마트스토어 수집 상품목록 (프리셋 폐지)
   const productSuggestions = useMemo(() => {
     const q = productName.toLowerCase().trim();
-    if (!q) return productPool.slice(0, 12);
-    return productPool.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
-  }, [productPool, productName]);
+    if (!q) return smartstoreProducts.slice(0, 12);
+    return smartstoreProducts.filter((p) => p.toLowerCase().includes(q)).slice(0, 12);
+  }, [smartstoreProducts, productName]);
 
   // 활성 회선 sequence 목록
   const activeSeqs = useMemo(

@@ -2,47 +2,25 @@
 
 import { useState } from "react";
 import { usePresets } from "@/hooks/use-presets";
-import { useVivaconProducts } from "@/hooks/use-vivacon-products";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, X } from "lucide-react";
 
 export function PresetsPanel() {
-  const {
-    suppliers,
-    products,
-    addSupplier,
-    removeSupplier,
-    addProduct,
-    removeProduct,
-  } = usePresets();
-
-  // 비바콘 스마트스토어 상품명 자동완성 ([비바콘] 접두 제거)
-  const vivaconProducts = useVivaconProducts();
+  const { suppliers, addSupplier, removeSupplier } = usePresets();
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        매입 입력 화면에서 원터치로 선택할 매입처/상품명을 관리합니다. (모든 기기 공유)
+        매입 입력 화면에서 원터치로 선택할 매입처를 관리합니다. (상품명은 스마트스토어 상품목록에서 자동 검색됩니다 · 모든 기기 공유)
       </p>
-      <datalist id="preset-vivacon-products">
-        {vivaconProducts.map((n) => <option key={n} value={n} />)}
-      </datalist>
       <PresetCard
         title="매입처 프리셋"
         items={suppliers}
         onAdd={addSupplier}
         onRemove={removeSupplier}
         placeholder="예: 지에스쿠폰"
-      />
-      <PresetCard
-        title="상품명 프리셋"
-        items={products}
-        onAdd={addProduct}
-        onRemove={removeProduct}
-        placeholder="예: 메가박스 2인패키지 (비바콘 상품명 검색)"
-        listId="preset-vivacon-products"
       />
     </div>
   );
